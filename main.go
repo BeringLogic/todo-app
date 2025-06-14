@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/sqlite3"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -27,6 +30,11 @@ func init() {
 		log.Fatal(err)
 	}
 
+	// Run migrations
+	if err := runMigrations(); err != nil {
+		log.Fatal(err)
+	}
+
 	// Create todos table if it doesn't exist
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS todos (
@@ -39,6 +47,28 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runMigrations() error {
+	driver, err := sqlite3.WithInstance(db, &sqlite3.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migrate driver: %v", err)
+	}
+
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://./migrations",
+		"sqlite3",
+		driver,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %v", err)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to run migrations: %v", err)
+	}
+
+	return nil
 }
 
 func getTodos(w http.ResponseWriter, r *http.Request) {
