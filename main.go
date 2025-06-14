@@ -35,15 +35,6 @@ func init() {
 		log.Fatal(err)
 	}
 
-	// Create todos table if it doesn't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS todos (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			title TEXT NOT NULL,
-			completed BOOLEAN DEFAULT FALSE,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
 	if err != nil {
 		log.Fatal(err)
 	}
