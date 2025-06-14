@@ -43,11 +43,31 @@
             --secondary-text: #313244;
         }
 
+        pre.todo-text {
+            margin: 5px 0 0 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: inherit;
+        }
+
+        .todo-edit {
+            border: 1px solid var(--border-color);
+            padding: 2px 4px;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            width: 100%;
+            box-sizing: border-box;
+            font-size: inherit;
+            font-family: inherit;
+        }
+
         body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 0 auto;
+            margin: auto;
             padding: 20px;
+            max-width: 600px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
         }
@@ -57,38 +77,44 @@
             padding: 20px;
             box-shadow: var(--container-shadow);
         }
+        .todo-form {
+            display: flex;
+            gap: 10px;
+        }
+        #todoInput {
+            width: 87%;
+            padding: 4px;
+            border-radius: 4px;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            font-family: inherit;
+            font-size: inherit;
+        }
         .todo-list {
             list-style: none;
             padding: 0;
         }
         .todo-item {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             padding: 10px;
             border: 1px solid var(--border-color);
             margin-bottom: 10px;
             border-radius: 4px;
         }
+
+        .todo-item input[type="checkbox"] {
+            align-self: flex-start;
+            margin-top: 5px;
+            margin-right: 10px;
+        }
         .todo-item.completed {
             background-color: var(--completed-bg);
         }
-        .todo-item.completed span {
+        .todo-item.completed pre {
             text-decoration: line-through;
         }
-        .todo-item input[type="checkbox"] {
-            margin-right: 10px;
-        }
-        button {
-            padding: 8px 16px;
-            background-color: var(--primary-color);
-            color: var(--primary-text);
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: var(--primary-hover);
-        }
+
         .todo-item button {
             margin-left: auto;
             padding: 5px 10px;
@@ -101,32 +127,11 @@
         .todo-item button:hover {
             background-color: var(--secondary-hover);
         }
-        .add-todo {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        input[type="text"] {
-            flex: 1;
-            padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background-color: var(--input-bg);
-            color: var(--input-text);
-            transition: border-color 0.2s;
-        }
-        input[type="text"]:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
         
-        .add-todo button {
-            color: var(--primary-text);
-        }
         button {
             padding: 8px 16px;
             background-color: var(--primary-color);
-            color: white;
+            color: var(--primary-text);
             border: none;
             border-radius: 4px;
             cursor: pointer;
@@ -191,12 +196,12 @@
             <span class="moon">🌙</span>
         </button>
     </div>
-    <div class="add-todo">
-        <input type="text" id="todoInput" placeholder="Add a new todo...">
-        <button onclick="addTodo()">Add</button>
-    </div>
     <div class="todos-container">
-        <h2>Active Todos</h2>
+        <div class="todo-form">
+            <textarea id="todoInput" rows="1" placeholder="Add a new todo..."></textarea>
+            <button onclick="addTodo()">Add</button>
+        </div>
+
         <ul id="activeTodos" class="todo-list"></ul>
         
         <div class="completed-section" id="completedSection">
@@ -230,7 +235,7 @@
                     li.className = 'todo-item';
                     li.innerHTML = `
                         <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                        <span>${todo.title}</span>
+                        <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
                         <button onclick="deleteTodo(${todo.id})">Delete</button>
                     `;
                     document.getElementById('activeTodos').appendChild(li);
@@ -242,7 +247,7 @@
                     li.className = 'todo-item completed';
                     li.innerHTML = `
                         <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                        <span>${todo.title}</span>
+                        <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
                         <button onclick="deleteTodo(${todo.id})">Delete</button>
                     `;
                     document.getElementById('completedTodos').appendChild(li);
@@ -265,6 +270,21 @@
                 alert('Failed to load todos. Please try again.');
             }
         }
+
+        // Add event listeners for todo text clicks
+        document.getElementById('activeTodos').addEventListener('click', function(e) {
+            if (e.target.classList.contains('todo-text')) {
+                const id = e.target.dataset.id;
+                editTodo(id, e.target);
+            }
+        });
+
+        document.getElementById('completedTodos').addEventListener('click', function(e) {
+            if (e.target.classList.contains('todo-text')) {
+                const id = e.target.dataset.id;
+                editTodo(id, e.target);
+            }
+        });
 
         // Toggle completed todos section
         document.getElementById('toggleCompleted').addEventListener('click', function() {
@@ -311,10 +331,133 @@
             }
         }
 
+        // Add Enter key handler
+        document.getElementById('todoInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addTodo();
+            }
+        });
+
+        async function editTodo(id, element) {
+            const originalText = element.innerText;
+
+            const textarea = document.createElement('textarea');
+            textarea.value = originalText;
+            textarea.className = 'todo-edit';
+            textarea.style.width = '100%';
+            textarea.style.resize = 'vertical';
+            textarea.style.height = element.scrollHeight + 'px';
+            textarea.style.minHeight = '20px';
+            textarea.style.padding = '4px';
+            textarea.style.marginRight = '10px';
+            textarea.style.boxSizing = 'border-box';
+            textarea.style.border = '1px solid var(--border-color)';
+            textarea.style.backgroundColor = 'var(--input-bg)';
+            textarea.style.color = 'var(--input-text)';
+            textarea.style.fontFamily = 'inherit';
+            textarea.style.fontSize = 'inherit';
+            element.replaceWith(textarea);
+
+            textarea.dataset.id = Number(id);
+
+            textarea.focus();
+            textarea.select();
+
+            // Handle Enter and Esc keys
+            textarea.addEventListener('keypress', async function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    await saveEdit(textarea, originalText);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    const pre = document.createElement('pre');
+                    pre.className = 'todo-text';
+                    pre.textContent = originalText;
+                    pre.onclick = () => editTodo(id, pre);
+                    textarea.replaceWith(pre);
+                }
+            });
+
+            textarea.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    const pre = document.createElement('pre');
+                    pre.className = 'todo-text';
+                    pre.textContent = originalText;
+                    pre.onclick = () => editTodo(id, pre);
+                    textarea.replaceWith(pre);
+                }
+            });
+
+            // Handle blur without saving
+            textarea.addEventListener('blur', async function() {
+                const pre = document.createElement('pre');
+                pre.className = 'todo-text';
+                pre.textContent = originalText;
+                pre.onclick = () => editTodo(id, pre);
+                textarea.replaceWith(pre);
+            });
+        }
+
+        async function saveEdit(textarea, originalText) {
+            const id = Number(textarea.dataset.id);
+            const newTitle = textarea.value.trim();
+            if (newTitle === originalText || newTitle === '') {
+                // Restore original text if no changes or empty
+                const pre = document.createElement('pre');
+                pre.className = 'todo-text';
+                pre.textContent = originalText;
+                pre.onclick = () => editTodo(id, pre);
+                textarea.replaceWith(pre);
+                return;
+            }
+
+            try {
+                const todoItem = textarea.parentElement;
+                const checkbox = todoItem.querySelector('input[type="checkbox"]');
+                const completed = checkbox.checked;
+                
+                const response = await fetch('/api/todo', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: Number(id),
+                        title: newTitle,
+                        completed: completed
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Response:', await response.json());
+                    throw new Error('Failed to update todo');
+                }
+
+                // Replace input with new pre
+                const pre = document.createElement('pre');
+                pre.className = 'todo-text';
+                pre.textContent = newTitle;
+                pre.onclick = () => editTodo(id, pre);
+                textarea.replaceWith(pre);
+            } catch (error) {
+                console.error('Error updating todo:', error);
+                alert('Failed to update todo. Please try again.');
+                // Restore original text
+                const pre = document.createElement('pre');
+                pre.className = 'todo-text';
+                pre.textContent = originalText;
+                pre.onclick = () => editTodo(id, pre);
+                textarea.replaceWith(pre);
+            }
+        }
+
         async function toggleTodo(id) {
             const checkbox = event.target;
             const todoItem = checkbox.parentElement;
-            const title = todoItem.querySelector('span').innerText;
+            const titleElement = todoItem.querySelector('.todo-text');
+            const title = titleElement.textContent;
 
             try {
                 const response = await fetch('/api/todo', {
