@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo List</title>
+    <style>
+        /* Catppuccin Latte (light) theme */
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #4c4f69;
+            --border-color: #81839d;
+            --primary-color: #74c08a;
+            --primary-hover: #68b77b;
+            --secondary-color: #f38ba8;
+            --secondary-hover: #ee718d;
+            --completed-bg: #f8f9fa;
+            --container-bg: #ffffff;
+            --container-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            --toggle-bg: #f8f9fa;
+            --toggle-hover: #f8f9fa;
+            --input-bg: #f8f9fa;
+            --input-text: #4c4f69;
+        }
+
+        /* Catppuccin Mocha (dark) theme */
+        body.dark-mode {
+            --bg-color: #1e1e2e;
+            --text-color: #cdd6f4;
+            --border-color: #585b70;
+            --primary-color: #a6e3a1;
+            --primary-hover: #94e295;
+            --secondary-color: #f38ba8;
+            --secondary-hover: #ee718d;
+            --completed-bg: #313244;
+            --container-bg: #1e1e2e;
+            --container-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            --toggle-bg: #313244;
+            --toggle-hover: #45475a;
+            --input-bg: #313244;
+            --input-text: #cdd6f4;
+            --primary-text: #1e1e2e;
+            --secondary-text: #313244;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+        .todos-container {
+            background: var(--container-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: var(--container-shadow);
+        }
+        .todo-list {
+            list-style: none;
+            padding: 0;
+        }
+        .todo-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .todo-item.completed {
+            background-color: var(--completed-bg);
+        }
+        .todo-item.completed span {
+            text-decoration: line-through;
+        }
+        .todo-item input[type="checkbox"] {
+            margin-right: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: var(--primary-color);
+            color: var(--primary-text);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+        .todo-item button {
+            margin-left: auto;
+            padding: 5px 10px;
+            border: none;
+            background-color: var(--secondary-color);
+            color: var(--secondary-text);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .todo-item button:hover {
+            background-color: var(--secondary-hover);
+        }
+        .add-todo {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            transition: border-color 0.2s;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+        
+        .add-todo button {
+            color: var(--primary-text);
+        }
+        button {
+            padding: 8px 16px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+        .completed-section {
+            margin-top: 20px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+        }
+        .toggle-completed-btn {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--toggle-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toggle-completed-btn:hover {
+            background-color: var(--toggle-hover);
+        }
+        .arrow {
+            transition: transform 0.2s;
+        }
+        
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        .theme-toggle button {
+            padding: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.5em;
+            color: var(--text-color);
+        }
+        .theme-toggle .moon {
+            display: none;
+        }
+        body.dark-mode .theme-toggle .sun {
+            display: none;
+        }
+        body.dark-mode .theme-toggle .moon {
+            display: inline;
+        }
+    </style>
+</head>
+<body>
+    <div class="theme-toggle">
+        <button id="darkModeToggle">
+            <span class="sun">☀️</span>
+            <span class="moon">🌙</span>
+        </button>
+    </div>
+    <div class="add-todo">
+        <input type="text" id="todoInput" placeholder="Add a new todo...">
+        <button onclick="addTodo()">Add</button>
+    </div>
+    <div class="todos-container">
+        <h2>Active Todos</h2>
+        <ul id="activeTodos" class="todo-list"></ul>
+        
+        <div class="completed-section" id="completedSection">
+            <button id="toggleCompleted" class="toggle-completed-btn">
+                <span class="arrow">▼</span>
+                <span class="toggle-text">Completed Todos</span>
+                <span class="count-badge"></span>
+            </button>
+            <ul id="completedTodos" class="todo-list" style="display: none;"></ul>
+        </div>
+    </div>
+
+    <script>
+        function loadTodos() {
+            fetch('/todos')
+                .then(response => response.json())
+                .then(todos => {
+                    const activeTodos = todos.filter(todo => !todo.completed);
+                    const completedTodos = todos.filter(todo => todo.completed);
+
+                    // Clear both lists
+                    document.getElementById('activeTodos').innerHTML = '';
+                    document.getElementById('completedTodos').innerHTML = '';
+
+                    // Add active todos
+                    activeTodos.forEach(todo => {
+                        const li = document.createElement('li');
+                        li.className = 'todo-item';
+                        li.innerHTML = `
+                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                            <span>${todo.title}</span>
+                            <button onclick="deleteTodo(${todo.id})">Delete</button>
+                        `;
+                        document.getElementById('activeTodos').appendChild(li);
+                    });
+
+                    // Add completed todos
+                    completedTodos.forEach(todo => {
+                        const li = document.createElement('li');
+                        li.className = 'todo-item completed';
+                        li.innerHTML = `
+                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                            <span>${todo.title}</span>
+                            <button onclick="deleteTodo(${todo.id})">Delete</button>
+                        `;
+                        document.getElementById('completedTodos').appendChild(li);
+                    });
+
+                    // Update toggle button count
+                    const toggleBtn = document.getElementById('toggleCompleted');
+                    const countBadge = toggleBtn.querySelector('.count-badge');
+                    if (countBadge) {
+                        countBadge.textContent = `(${completedTodos.length})`;
+                    } else {
+                        toggleBtn.innerHTML = `
+                            <span class="arrow">▼</span>
+                            <span class="toggle-text">Completed Todos</span>
+                            <span class="count-badge">(${completedTodos.length})</span>
+                        `;
+                    }
+                });
+        }
+
+        // Toggle completed todos section
+        document.getElementById('toggleCompleted').addEventListener('click', function() {
+            const completedList = document.getElementById('completedTodos');
+            const arrow = this.querySelector('.arrow');
+            const toggleText = this.querySelector('.toggle-text');
+            
+            if (completedList.style.display === 'none') {
+                completedList.style.display = 'block';
+                arrow.textContent = '▲';
+                localStorage.setItem('completedExpanded', 'true');
+            } else {
+                completedList.style.display = 'none';
+                arrow.textContent = '▼';
+                localStorage.setItem('completedExpanded', 'false');
+            }
+        });
+
+        function addTodo() {
+            const input = document.getElementById('todoInput');
+            if (input.value.trim()) {
+                fetch('/todo/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        title: input.value.trim(),
+                        completed: false
+                    })
+                })
+                .then(() => {
+                    input.value = '';
+                    loadTodos();
+                });
+            }
+        }
+
+        function toggleTodo(id) {
+            const checkbox = event.target;
+            const todoItem = checkbox.parentElement;
+            const title = todoItem.querySelector('span').innerText;
+            fetch('/todo/update?id=' + id, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    title: title,
+                    completed: checkbox.checked
+                })
+            })
+            .then(() => loadTodos());
+        }
+
+        function deleteTodo(id) {
+            if (confirm('Are you sure you want to delete this todo?')) {
+                fetch('/todo/delete?id=' + id, {
+                    method: 'POST'
+                })
+                .then(() => loadTodos());
+            }
+        }
+
+        // Load todos when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if dark mode is saved in localStorage
+            const savedMode = localStorage.getItem('darkMode');
+            if (savedMode === 'true') {
+                document.body.classList.add('dark-mode');
+                document.getElementById('darkModeToggle').querySelector('.sun').style.display = 'none';
+                document.getElementById('darkModeToggle').querySelector('.moon').style.display = 'inline';
+            }
+
+            // Initialize completed section visibility
+            const completedList = document.getElementById('completedTodos');
+            const toggleBtn = document.getElementById('toggleCompleted');
+            const arrow = toggleBtn.querySelector('.arrow');
+            const toggleText = toggleBtn.querySelector('.toggle-text');
+            
+            // Check if completed section was expanded before
+            const wasExpanded = localStorage.getItem('completedExpanded') === 'true';
+            
+            // Update visibility and arrow direction
+            if (wasExpanded) {
+                completedList.style.display = 'block';
+                arrow.textContent = '▲';
+            } else {
+                completedList.style.display = 'none';
+                arrow.textContent = '▼';
+            }
+
+            loadTodos();
+        });
+
+        // Toggle dark mode
+        document.getElementById('darkModeToggle').addEventListener('click', function(e) {
+            e.preventDefault();
+            const sun = this.querySelector('.sun');
+            const moon = this.querySelector('.moon');
+            const isDark = document.body.classList.contains('dark-mode');
+            
+            if (isDark) {
+                document.body.classList.remove('dark-mode');
+                localStorage.setItem('darkMode', 'false');
+                sun.style.display = 'inline';
+                moon.style.display = 'none';
+            } else {
+                document.body.classList.add('dark-mode');
+                localStorage.setItem('darkMode', 'true');
+                sun.style.display = 'none';
+                moon.style.display = 'inline';
+            }
+        });
+    </script>
+</body>
+</html>

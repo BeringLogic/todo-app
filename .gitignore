@@ -1,0 +1,35 @@
+# Go
+*.exe
+*.test
+*.prof
+*.out
+*.a
+*.o
+*.so
+*.syso
+*.dll
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Database
+*.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local development
+node_modules/
+build/
+dist/
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
