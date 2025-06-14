@@ -210,54 +210,60 @@
     </div>
 
     <script>
-        function loadTodos() {
-            fetch('/todos')
-                .then(response => response.json())
-                .then(todos => {
-                    const activeTodos = todos.filter(todo => !todo.completed);
-                    const completedTodos = todos.filter(todo => todo.completed);
+        async function loadTodos() {
+            try {
+                const response = await fetch('/api/todos');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch todos');
+                }
+                const todos = await response.json();
+                const activeTodos = todos.filter(todo => !todo.completed);
+                const completedTodos = todos.filter(todo => todo.completed);
 
-                    // Clear both lists
-                    document.getElementById('activeTodos').innerHTML = '';
-                    document.getElementById('completedTodos').innerHTML = '';
+                // Clear both lists
+                document.getElementById('activeTodos').innerHTML = '';
+                document.getElementById('completedTodos').innerHTML = '';
 
-                    // Add active todos
-                    activeTodos.forEach(todo => {
-                        const li = document.createElement('li');
-                        li.className = 'todo-item';
-                        li.innerHTML = `
-                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                            <span>${todo.title}</span>
-                            <button onclick="deleteTodo(${todo.id})">Delete</button>
-                        `;
-                        document.getElementById('activeTodos').appendChild(li);
-                    });
-
-                    // Add completed todos
-                    completedTodos.forEach(todo => {
-                        const li = document.createElement('li');
-                        li.className = 'todo-item completed';
-                        li.innerHTML = `
-                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                            <span>${todo.title}</span>
-                            <button onclick="deleteTodo(${todo.id})">Delete</button>
-                        `;
-                        document.getElementById('completedTodos').appendChild(li);
-                    });
-
-                    // Update toggle button count
-                    const toggleBtn = document.getElementById('toggleCompleted');
-                    const countBadge = toggleBtn.querySelector('.count-badge');
-                    if (countBadge) {
-                        countBadge.textContent = `(${completedTodos.length})`;
-                    } else {
-                        toggleBtn.innerHTML = `
-                            <span class="arrow">▼</span>
-                            <span class="toggle-text">Completed Todos</span>
-                            <span class="count-badge">(${completedTodos.length})</span>
-                        `;
-                    }
+                // Add active todos
+                activeTodos.forEach(todo => {
+                    const li = document.createElement('li');
+                    li.className = 'todo-item';
+                    li.innerHTML = `
+                        <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                        <span>${todo.title}</span>
+                        <button onclick="deleteTodo(${todo.id})">Delete</button>
+                    `;
+                    document.getElementById('activeTodos').appendChild(li);
                 });
+
+                // Add completed todos
+                completedTodos.forEach(todo => {
+                    const li = document.createElement('li');
+                    li.className = 'todo-item completed';
+                    li.innerHTML = `
+                        <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                        <span>${todo.title}</span>
+                        <button onclick="deleteTodo(${todo.id})">Delete</button>
+                    `;
+                    document.getElementById('completedTodos').appendChild(li);
+                });
+
+                // Update toggle button count
+                const toggleBtn = document.getElementById('toggleCompleted');
+                const countBadge = toggleBtn.querySelector('.count-badge');
+                if (countBadge) {
+                    countBadge.textContent = `(${completedTodos.length})`;
+                } else {
+                    toggleBtn.innerHTML = `
+                        <span class="arrow">▼</span>
+                        <span class="toggle-text">Completed Todos</span>
+                        <span class="count-badge">(${completedTodos.length})</span>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading todos:', error);
+                alert('Failed to load todos. Please try again.');
+            }
         }
 
         // Toggle completed todos section
@@ -277,49 +283,81 @@
             }
         });
 
-        function addTodo() {
+        async function addTodo() {
             const input = document.getElementById('todoInput');
             if (input.value.trim()) {
-                fetch('/todo/add', {
-                    method: 'POST',
+                try {
+                    const response = await fetch('/api/todo', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            title: input.value.trim(),
+                            completed: false
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to add todo');
+                    }
+
+                    input.value = '';
+                    await loadTodos();
+                } catch (error) {
+                    console.error('Error adding todo:', error);
+                    alert('Failed to add todo. Please try again.');
+                }
+            }
+        }
+
+        async function toggleTodo(id) {
+            const checkbox = event.target;
+            const todoItem = checkbox.parentElement;
+            const title = todoItem.querySelector('span').innerText;
+
+            try {
+                const response = await fetch('/api/todo', {
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        title: input.value.trim(),
-                        completed: false
+                        id: id,
+                        title: title,
+                        completed: checkbox.checked
                     })
-                })
-                .then(() => {
-                    input.value = '';
-                    loadTodos();
                 });
+
+                if (!response.ok) {
+                    throw new Error('Failed to toggle todo');
+                }
+
+                await loadTodos();
+            } catch (error) {
+                console.error('Error toggling todo:', error);
+                alert('Failed to toggle todo. Please try again.');
             }
         }
 
-        function toggleTodo(id) {
-            const checkbox = event.target;
-            const todoItem = checkbox.parentElement;
-            const title = todoItem.querySelector('span').innerText;
-            fetch('/todo/update?id=' + id, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    title: title,
-                    completed: checkbox.checked
-                })
-            })
-            .then(() => loadTodos());
-        }
+        async function deleteTodo(id) {
+            if (!confirm('Are you sure you want to delete this todo?')) {
+                return;
+            }
 
-        function deleteTodo(id) {
-            if (confirm('Are you sure you want to delete this todo?')) {
-                fetch('/todo/delete?id=' + id, {
-                    method: 'POST'
-                })
-                .then(() => loadTodos());
+            try {
+                const response = await fetch(`/api/todo?id=${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to delete todo');
+                }
+
+                await loadTodos();
+            } catch (error) {
+                console.error('Error deleting todo:', error);
+                alert('Failed to delete todo. Please try again.');
             }
         }
 

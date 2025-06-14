@@ -86,15 +86,14 @@ func addTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateTodo(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		http.Error(w, "ID is required", http.StatusBadRequest)
-		return
-	}
-
 	var todo Todo
 	if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if todo.ID == 0 {
+		http.Error(w, "ID is required", http.StatusBadRequest)
 		return
 	}
 
@@ -105,7 +104,7 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, id); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -136,18 +135,46 @@ func deleteTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// Serve index.html at root path
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "index.html")
-	})
-	// API endpoints
-	http.HandleFunc("/todos", getTodos)
-	http.HandleFunc("/todo/add", addTodo)
-	http.HandleFunc("/todo/update", updateTodo)
-	http.HandleFunc("/todo/delete", deleteTodo)
+	// Create a new HTTP server
+	server := &http.Server{
+		Addr:    ":8081",
+		Handler: createRouter(),
+	}
 
 	fmt.Println("Server running on port 8081")
-	if err := http.ListenAndServe(":8081", nil); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func createRouter() http.Handler {
+	// Create a new router
+	mux := http.NewServeMux()
+
+	// Serve static files
+	mux.Handle("/", http.FileServer(http.Dir(".")))
+
+	// API routes
+	mux.HandleFunc("/api/todos", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		getTodos(w, r)
+	})
+
+	mux.HandleFunc("/api/todo", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			addTodo(w, r)
+		case http.MethodPut:
+			updateTodo(w, r)
+		case http.MethodDelete:
+			deleteTodo(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	return mux
 }
