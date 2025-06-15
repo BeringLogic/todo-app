@@ -21,6 +21,8 @@
             --toggle-hover: #f8f9fa;
             --input-bg: #f8f9fa;
             --input-text: #4c4f69;
+            --yellow-color: #df8e1d;
+            --red-color: #d20f39;
         }
 
         /* Catppuccin Mocha (dark) theme */
@@ -41,6 +43,8 @@
             --input-text: #cdd6f4;
             --primary-text: #1e1e2e;
             --secondary-text: #313244;
+            --yellow-color: #df8e1d;
+            --red-color: #d20f39;
         }
 
         body {
@@ -245,19 +249,32 @@
         .todo-item:hover {
             background-color: var(--toggle-hover);
         }
-        .todo-item input {
+        .todo-item .todo-checkbox {
             margin-right: 10px;
             align-self: flex-start;
             margin-top: 4px;
+        }
+
+        .todo-item .todo-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
         }
 
         .todo-item pre {
             margin: 0;
             padding: 2px 0 0 0;
             white-space: pre-wrap;
-            word-wrap: break-word;
-            font-family: inherit;
+            word-break: break-word;
+            flex-grow: 1;
+            line-height: 1.4;
             font-size: inherit;
+            font-family: inherit;
+        }
+
+        .todo-item .due-date {
+            font-size: 0.8em;
+            margin: 2px 0 0 0;
         }
 
         .todo-item textarea {
@@ -269,8 +286,25 @@
             font-family: inherit;
         }
 
+        .due-date {
+            font-size: 0.75em;
+            margin-left: 28px;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .due-date.today {
+            background-color: var(--yellow-color);
+            color: var(--toggle-bg);
+        }
+        .due-date.overdue {
+            background-color: var(--red-color);
+            color: var(--toggle-bg);
+        }
+
         .todo-menu-btn {
             display: block;
+            align-self: flex-start;
+            margin: 4px 0 0 auto;
             background: none;
             border: none;
             color: var(--text-color);
@@ -304,14 +338,14 @@
             background-color: var(--toggle-bg);
         }
 
-        /* hide old button style */
-        .todo-item button {
-            align-self: flex-start;
-            margin: 4px 0 0 auto;
-            border: none;
-            background: none;
-            cursor: pointer;
-            transition: background-color 0.2s;
+        .todo-date-input {
+            flex: 1;
+            padding: 4px 0 0 0;
+            margin: 0;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
         }
 
         .toggle-completed-btn {
@@ -485,7 +519,25 @@
                 document.querySelectorAll('.todo-menu').forEach(m => {
                     if (m !== menu) m.classList.remove('active');
                 });
+                
+                // Set the date input value before showing the menu
+                const dateInput = menu.querySelector('.todo-date-input');
+                dateInput.value = dateInput.dataset.due.split('T')[0];
+                
+                // Now show the menu
                 menu.classList.toggle('active');
+                return;
+            }
+
+            const menu = e.target.closest('.todo-menu');
+            if (!menu) {
+                // click outside hide menus
+                document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
+                return;
+            }
+
+            // Don't close menu if clicking on date input
+            if (e.target.closest('.todo-date-input')) {
                 return;
             }
 
@@ -494,9 +546,8 @@
                 if (menuItem.dataset.action === 'delete') {
                     deleteTodo(menuItem.dataset.id);
                 }
-                menuItem.parentElement.classList.remove('active');
-                return;
             }
+
             // click outside hide menus
             document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
         });
@@ -505,6 +556,34 @@
         document.getElementById('menuToggle').addEventListener('click', function() {
             const overlay = document.getElementById('menuOverlay');
             overlay.classList.toggle('active');
+        });
+
+        // Global handler: save due date immediately when date input changes
+        document.addEventListener('change', async function(e) {
+            const input = e.target;
+            if (!(input instanceof HTMLInputElement) || !input.classList.contains('todo-date-input')) return;
+
+            const todoId = input.dataset.id;
+            const li = input.closest('.todo-item');
+            if (!todoId || !li) return;
+            const checkbox = li.querySelector('input[type="checkbox"]');
+            const titleEl = li.querySelector('.todo-text');
+
+            try {
+                await fetch('/api/todo', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: Number(todoId),
+                        title: titleEl ? titleEl.textContent : '',
+                        completed: checkbox ? checkbox.checked : false,
+                        due_date: input.value || null
+                    })
+                });
+                await loadTodosByProject();
+            } catch (err) {
+                console.error('Failed to set due date', err);
+            }
         });
 
         // Close menu when clicking outside
@@ -615,14 +694,34 @@
                 filteredTodos.forEach(todo => {
                     const li = document.createElement('li');
                     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
+                    let dueDateHtml = '';
+                    if (todo.due_date) {
+                        const d = new Date(todo.due_date);
+                        const today = new Date().toISOString().split('T')[0];
+                        let dueDateClass = '';
+                        if (d.toISOString().split('T')[0] === today) {
+                            dueDateClass = "today";
+                        } else if (d.toISOString().split('T')[0] < today && !todo.completed) {
+                            dueDateClass = "overdue";
+                        }
+                        dueDateHtml = `<div><span class="due-date ${dueDateClass}">Due: ${d.toLocaleDateString()}</span></div>`;
+                    }
+
                     li.innerHTML = `
-                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                            <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
+                            <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                            <div class="todo-content">
+                                <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
+                                ${dueDateHtml}
+                            </div>
                             <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
                             <div class="todo-menu">
+                                <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
+                                    <span>Due</span>
+                                    <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" style="">
+                                </div>
                                 <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
                             </div>
-                    `;
+                        `;
                     
                     if (todo.completed) {
                         completedTodos.appendChild(li);
@@ -850,6 +949,8 @@
             const todoItem = checkbox.parentElement;
             const titleElement = todoItem.querySelector('.todo-text');
             const title = titleElement.textContent;
+            const dueDateInput = todoItem.querySelector('.todo-date-input');
+            const dueDate = dueDateInput ? dueDateInput.dataset.due : null;
 
             try {
                 const response = await fetch('/api/todo', {
@@ -860,7 +961,8 @@
                     body: JSON.stringify({
                         id: id,
                         title: title,
-                        completed: checkbox.checked
+                        completed: checkbox.checked,
+                        due_date: dueDate || null
                     })
                 });
 
@@ -875,10 +977,10 @@
             }
         }
 
-async function deleteTodo(id) {
-    if (!confirm('Are you sure you want to delete this todo?')) {
-        return;
-    }
+        async function deleteTodo(id) {
+            if (!confirm('Are you sure you want to delete this todo?')) {
+                return;
+            }
 
     try {
         const response = await fetch(`/api/todo?id=${id}`, {
