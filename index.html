@@ -604,16 +604,24 @@
                 const activeTodos = activeList.querySelector('.todo-list');
                 const completedTodos = completedList.querySelector('.todo-list');
 
+                // Sort completed todos by completed_at in descending order
+                filteredTodos.sort((a, b) => {
+                    if (a.completed && b.completed) {
+                        return new Date(b.completed_at || 0) - new Date(a.completed_at || 0);
+                    }
+                    return 0;
+                });
+
                 filteredTodos.forEach(todo => {
                     const li = document.createElement('li');
                     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
                     li.innerHTML = `
-                        <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
-                        <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
-                        <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
-                        <div class="todo-menu">
-                            <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
-                        </div>
+                            <input type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
+                            <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
+                            <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
+                            <div class="todo-menu">
+                                <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
+                            </div>
                     `;
                     
                     if (todo.completed) {

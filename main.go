@@ -17,11 +17,12 @@ import (
 )
 
 type Todo struct {
-	ID        int       `json:"id"`
-	Title     string    `json:"title"`
-	Completed bool      `json:"completed"`
-	CreatedAt time.Time `json:"created_at"`
-	ProjectID int       `json:"project_id"`
+	ID          int        `json:"id"`
+	Title       string     `json:"title"`
+	Completed   bool       `json:"completed"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ProjectID   int        `json:"project_id"`
 }
 
 type Project struct {
@@ -267,7 +268,14 @@ func deleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTodos(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, title, completed, created_at, project_id FROM todos ORDER BY created_at DESC")
+	rows, err := db.Query(`
+		SELECT id, title, completed, created_at, completed_at, project_id 
+		FROM todos 
+		ORDER BY 
+			CASE WHEN completed = 0 THEN 0 ELSE 1 END,  -- Incomplete first
+			CASE WHEN completed = 1 THEN completed_at END DESC,  -- Completed items by completed_at DESC
+			created_at DESC  -- Then by creation time
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -277,7 +285,7 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var todo Todo
-		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.ProjectID); err != nil {
+		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.ProjectID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -322,14 +330,22 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ? WHERE id = ?")
+	// If the todo is being marked as completed and completed_at is not set, set it to now
+	if todo.Completed && todo.CompletedAt == nil {
+		now := time.Now()
+		todo.CompletedAt = &now
+	} else if !todo.Completed {
+		todo.CompletedAt = nil
+	}
+
+	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ? WHERE id = ?")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ID); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
