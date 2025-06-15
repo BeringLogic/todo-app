@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -18,6 +20,14 @@ type Todo struct {
 	ID        int       `json:"id"`
 	Title     string    `json:"title"`
 	Completed bool      `json:"completed"`
+	CreatedAt time.Time `json:"created_at"`
+	ProjectID int       `json:"project_id"`
+}
+
+type Project struct {
+	ID        int       `json:"id"`
+	Title     string    `json:"title"`
+	Position  int       `json:"position"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -62,8 +72,202 @@ func runMigrations() error {
 	return nil
 }
 
+func getProject(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var project Project
+	err := db.QueryRow("SELECT id, title, position, created_at FROM projects WHERE id = ?", id).
+		Scan(&project.ID, &project.Title, &project.Position, &project.CreatedAt)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(project)
+}
+
+func getProjects(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, title, position, created_at FROM projects ORDER BY position")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var projects []Project
+	for rows.Next() {
+		var project Project
+		if err := rows.Scan(&project.ID, &project.Title, &project.Position, &project.CreatedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		projects = append(projects, project)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(projects)
+}
+
+func addProject(w http.ResponseWriter, r *http.Request) {
+	var project Project
+	if err := json.NewDecoder(r.Body).Decode(&project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Get the highest position
+	var maxPosition int
+	err := db.QueryRow("SELECT MAX(position) FROM projects").Scan(&maxPosition)
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	project.Position = maxPosition + 1
+
+	stmt, err := db.Prepare("INSERT INTO projects (title, position) VALUES (?, ?)")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(project.Title, project.Position)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the ID of the inserted project
+	id, err := result.LastInsertId()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the created project with its ID
+	var createdProject Project
+	err = db.QueryRow("SELECT id, title, position, created_at FROM projects WHERE id = ?", id).
+		Scan(&createdProject.ID, &createdProject.Title, &createdProject.Position, &createdProject.CreatedAt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(createdProject)
+}
+
+func updateProject(w http.ResponseWriter, r *http.Request) {
+	// Extract project ID from URL
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/projects/")
+
+	if idStr == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse ID
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	// Decode request body
+	var project Project
+	if err := json.NewDecoder(r.Body).Decode(&project); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Update project
+	stmt, err := db.Prepare("UPDATE projects SET title = ? WHERE id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(project.Title, id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Check if project was found and updated
+	var updatedProject Project
+	err = db.QueryRow("SELECT id, title, position, created_at FROM projects WHERE id = ?", id).
+		Scan(&updatedProject.ID, &updatedProject.Title, &updatedProject.Position, &updatedProject.CreatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Project not found", http.StatusNotFound)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedProject)
+}
+
+func deleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Delete todos first
+	stmt, err := db.Prepare("DELETE FROM todos WHERE project_id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Then delete the project
+	stmt, err = db.Prepare("DELETE FROM projects WHERE id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	result, err := stmt.Exec(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func getTodos(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, title, completed, created_at FROM todos ORDER BY created_at DESC")
+	rows, err := db.Query("SELECT id, title, completed, created_at, project_id FROM todos ORDER BY created_at DESC")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -73,7 +277,7 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var todo Todo
-		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt); err != nil {
+		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.ProjectID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -91,14 +295,14 @@ func addTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := db.Prepare("INSERT INTO todos (title, completed) VALUES (?, ?)")
+	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id) VALUES (?, ?, ?)")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -169,13 +373,35 @@ func main() {
 }
 
 func createRouter() http.Handler {
-	// Create a new router
 	mux := http.NewServeMux()
 
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.Dir(".")))
 
-	// API routes
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getProjects(w, r)
+		case http.MethodPost:
+			addProject(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/projects/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			getProject(w, r)
+		case http.MethodPut:
+			updateProject(w, r)
+		case http.MethodDelete:
+			deleteProject(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc("/api/todos", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
