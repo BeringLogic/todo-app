@@ -50,7 +50,6 @@
         body {
             margin: auto;
             padding: 20px;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
             position: relative;
@@ -147,7 +146,7 @@
 
         .projects-container {
             display: flex;
-            gap: 20px;
+            gap: 0;
             padding: 20px;
             overflow-x: auto;
             position: fixed;
@@ -159,6 +158,7 @@
 
         .project-item {
             width: 200px;
+            min-width: 200px;
             padding: 12px;
             cursor: pointer;
             height: 97%;
@@ -272,11 +272,6 @@
             font-family: inherit;
         }
 
-        .todo-item .due-date {
-            font-size: 0.8em;
-            margin: 2px 0 0 0;
-        }
-
         .todo-item textarea {
             border: none;
             background-color: var(--input-bg);
@@ -287,21 +282,25 @@
         }
 
         .due-date {
-            font-size: 0.75em;
-            margin-left: 28px;
-            padding: 2px 4px;
-            border-radius: 4px;
+            font-size: 0.8em;
+            margin: 2px 0 0 0;
         }
+
         .due-date.today {
             background-color: var(--yellow-color);
             color: var(--toggle-bg);
+            padding: 4px 2px 0 2px;
+            border-radius: 4px;
         }
         .due-date.overdue {
             background-color: var(--red-color);
             color: var(--toggle-bg);
+            padding: 4px 2px 0 2px;
+            border-radius: 4px;
         }
 
-        .recurrence-icon {
+        .recurrence-info {
+            font-size: 0.8em;
             display: inline-flex;
             margin-left: 6px;
             color: var(--text-color);
@@ -387,7 +386,9 @@
             transition: transform 0.2s;
         }
         
-        .todo-item.completed pre {
+        .todo-item.completed pre,
+        .todo-item.completed .due-date,
+        .todo-item.completed .recurrence-info {
             text-decoration: line-through;
         }
     </style>
@@ -415,6 +416,27 @@
     <div class="projects-container"></div>
 
     <script>
+        /**
+         * Build a read-only project group that lists todos due in the next 6 days.
+         * @param {Array} todos – the todos that are due soon
+         */
+        async function loadUpcomingTodos(todos) {
+            // Reuse full-featured loadProject to ensure consistent functionality
+            const pseudoProject = { id: 'nextweek', title: 'Next Week' };
+            const group = await loadProject(pseudoProject, todos);
+
+            // Make title read-only (remove click handlers and pointer events)
+            group.querySelector('.project-title').style.pointerEvents = 'none';
+
+            // Remove elements that don't make sense for the special group
+            group.querySelector('.delete-project-btn')?.remove();
+            group.querySelector('.todo-form')?.remove();
+            group.querySelector('.toggle-completed-btn')?.remove();
+            group.querySelector('.completed-todos')?.remove();
+
+            return group;
+        }
+
         let editingProject = null;
 
         function startProjectEdit(element) {
@@ -643,6 +665,8 @@
             if (!todoId || !li) return;
             const checkbox = li.querySelector('input[type="checkbox"]');
             const titleEl = li.querySelector('.todo-text');
+            const countEl = li.querySelector('.recurrence-count');
+            const unitEl = li.querySelector('.recurrence-unit');
 
             try {
                 await fetch('/api/todo', {
@@ -652,7 +676,9 @@
                         id: Number(todoId),
                         title: titleEl ? titleEl.textContent : '',
                         completed: checkbox ? checkbox.checked : false,
-                        due_date: input.value || null
+                        due_date: input.value || null,
+                        recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
                     })
                 });
                 await loadTodosByProject();
@@ -710,7 +736,30 @@
                 const projects = await projectsResponse.json();
 
                 const projectsContainer = document.querySelector('.projects-container');
-                projectsContainer.innerHTML = '';           
+                projectsContainer.innerHTML = '';
+
+                // Add special "Next Week" project section for upcoming todos
+                const today = new Date();
+                const nextWeek = new Date();
+                nextWeek.setDate(today.getDate() + 6);
+                const upcomingTodos = todos.filter(todo => {
+                    if (!todo.due_date) return false;
+                    const due = new Date(todo.due_date);
+                    return due <= nextWeek;
+                });
+
+                // Sort by due_date in ascending order
+                upcomingTodos.sort((a, b) => {
+                    if (a.due_date && b.due_date) {
+                        return new Date(a.due_date) - new Date(b.due_date);
+                    }
+                    return 0;
+                });
+
+                if (upcomingTodos.length > 0) {
+                    const upcomingGroup = await loadUpcomingTodos(upcomingTodos);
+                    projectsContainer.appendChild(upcomingGroup);
+                }          
 
                 // Create a project group for each project
                 for (const project of projects) {
@@ -772,18 +821,19 @@
                     let dueDateHtml = '';
                     let recurrenceHtml = '';
                     if (todo.due_date) {
-                        const d = new Date(todo.due_date);
-                        const today = new Date().toISOString().split('T')[0];
+                        // Use the raw date string (YYYY-MM-DD) to avoid timezone shift
+                        const dueLocal = todo.due_date.split('T')[0];
+                        const todayLocal = new Date().toISOString().split('T')[0];
                         let dueDateClass = '';
-                        if (d.toISOString().split('T')[0] === today) {
+                        if (dueLocal === todayLocal) {
                             dueDateClass = "today";
-                        } else if (d.toISOString().split('T')[0] < today && !todo.completed) {
+                        } else if (dueLocal < todayLocal && !todo.completed) {
                             dueDateClass = "overdue";
                         }
+                        dueDateHtml = `<span class="due-date ${dueDateClass}">🗓 ${dueLocal}</span>`;
                         if (todo.recurrence_interval && todo.recurrence_unit) {
-                            recurrenceHtml = `<span class="recurrence-icon">⟳</span>`;
+                            recurrenceHtml = `<span class="recurrence-info">⟳ ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</span>`;
                         }
-                        dueDateHtml = `<span class="due-date ${dueDateClass}">Due: ${d.toLocaleDateString()}</span>`;
                     }
 
                     li.innerHTML = `
@@ -1045,7 +1095,10 @@
             const titleElement = todoItem.querySelector('.todo-text');
             const title = titleElement.textContent;
             const dueDateInput = todoItem.querySelector('.todo-date-input');
-            const dueDate = dueDateInput ? (dueDateInput.value || null) : null;
+            let dueDate = null;
+            if (dueDateInput) {
+                dueDate = dueDateInput.value || dueDateInput.dataset.due.split('T')[0] || null;
+            }
             const countEl = todoItem.querySelector('.recurrence-count');
             const unitEl = todoItem.querySelector('.recurrence-unit');
             const recInt = countEl && countEl.value ? Number(countEl.value) : null;
