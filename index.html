@@ -301,6 +301,12 @@
             color: var(--toggle-bg);
         }
 
+        .recurrence-icon {
+            display: inline-flex;
+            margin-left: 6px;
+            color: var(--text-color);
+        }
+
         .todo-menu-btn {
             display: block;
             align-self: flex-start;
@@ -347,7 +353,21 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
         }
-
+        .recurrence-count {
+            width: 60px;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+        .recurrence-unit {
+            width: 60px;
+            background-color: var(--input-bg);
+            color: var(--input-text);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+        
         .toggle-completed-btn {
             width: 100%;
             background-color: var(--toggle-bg);
@@ -536,8 +556,8 @@
                 return;
             }
 
-            // Don't close menu if clicking on date input
-            if (e.target.closest('.todo-date-input')) {
+            // Don't close menu if clicking on date or recurrence inputs
+            if (e.target.closest('.todo-date-input, .recurrence-count, .recurrence-unit')) {
                 return;
             }
 
@@ -558,7 +578,62 @@
             overlay.classList.toggle('active');
         });
 
-        // Global handler: save due date immediately when date input changes
+        // Global handler: save due date or recurrence changes immediately
+        document.addEventListener('change', async function(e) {
+            const target = e.target;
+            // Handle due date
+            if (target.classList.contains('todo-date-input')) {
+                const todoId = target.dataset.id;
+                const li = target.closest('.todo-item');
+                if (!todoId || !li) return;
+                const checkbox = li.querySelector('.todo-checkbox');
+                const titleEl = li.querySelector('.todo-text');
+                const countEl = li.querySelector('.recurrence-count');
+                const unitEl = li.querySelector('.recurrence-unit');
+                try {
+                    await fetch('/api/todo', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            id: Number(todoId),
+                            title: titleEl ? titleEl.textContent : '',
+                            completed: checkbox ? checkbox.checked : false,
+                            due_date: target.value || null,
+                            recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                            recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
+                        })
+                    });
+                    await loadTodosByProject();
+                } catch(err){console.error(err);}
+                return;
+            }
+            // Handle recurrence change (number or unit)
+            if (target.classList.contains('recurrence-count') || target.classList.contains('recurrence-unit')) {
+                const li = target.closest('.todo-item');
+                const todoId = target.dataset.id;
+                if (!li || !todoId) return;
+                const checkbox = li.querySelector('.todo-checkbox');
+                const titleEl = li.querySelector('.todo-text');
+                const dateInput = li.querySelector('.todo-date-input');
+                const countEl = li.querySelector('.recurrence-count');
+                const unitEl = li.querySelector('.recurrence-unit');
+                try {
+                    await fetch('/api/todo', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            id: Number(todoId),
+                            title: titleEl ? titleEl.textContent : '',
+                            completed: checkbox ? checkbox.checked : false,
+                            due_date: dateInput ? dateInput.value : null,
+                            recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                            recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
+                        })
+                    });
+                    await loadTodosByProject();
+                } catch(err){console.error(err);}            
+            }
+        });
         document.addEventListener('change', async function(e) {
             const input = e.target;
             if (!(input instanceof HTMLInputElement) || !input.classList.contains('todo-date-input')) return;
@@ -695,6 +770,7 @@
                     const li = document.createElement('li');
                     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
                     let dueDateHtml = '';
+                    let recurrenceHtml = '';
                     if (todo.due_date) {
                         const d = new Date(todo.due_date);
                         const today = new Date().toISOString().split('T')[0];
@@ -704,20 +780,33 @@
                         } else if (d.toISOString().split('T')[0] < today && !todo.completed) {
                             dueDateClass = "overdue";
                         }
-                        dueDateHtml = `<div><span class="due-date ${dueDateClass}">Due: ${d.toLocaleDateString()}</span></div>`;
+                        if (todo.recurrence_interval && todo.recurrence_unit) {
+                            recurrenceHtml = `<span class="recurrence-icon">⟳</span>`;
+                        }
+                        dueDateHtml = `<span class="due-date ${dueDateClass}">Due: ${d.toLocaleDateString()}</span>`;
                     }
 
                     li.innerHTML = `
                             <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
                             <div class="todo-content">
                                 <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
-                                ${dueDateHtml}
+                                <div>${dueDateHtml}${recurrenceHtml}</div>
                             </div>
                             <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
                             <div class="todo-menu">
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
                                     <span>Due</span>
                                     <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" style="">
+                                </div>
+                                <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
+                                    <span>Repeat</span>
+                                    <input type="number" min="1" class="recurrence-count" data-id="${todo.id}" value="${todo.recurrence_interval || ''}" style="width:60px;">
+                                    <select class="recurrence-unit" data-id="${todo.id}">
+                                        <option value="day" ${todo.recurrence_unit==='day' ? 'selected':''}>day(s)</option>
+                                        <option value="week" ${todo.recurrence_unit==='week' ? 'selected':''}>week(s)</option>
+                                        <option value="month" ${todo.recurrence_unit==='month' ? 'selected':''}>month(s)</option>
+                                        <option value="year" ${todo.recurrence_unit==='year' ? 'selected':''}>year(s)</option>
+                                    </select>
                                 </div>
                                 <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
                             </div>
@@ -905,9 +994,12 @@
             }
 
             try {
-                const todoItem = textarea.parentElement;
-                const checkbox = todoItem.querySelector('input[type="checkbox"]');
-                const completed = checkbox.checked;
+                const li = textarea.closest('.todo-item');
+                const checkbox = li ? li.querySelector('.todo-checkbox') : null;
+                const completed = checkbox ? checkbox.checked : false;
+                const dueInput = li ? li.querySelector('.todo-date-input') : null;
+                const countEl = li ? li.querySelector('.recurrence-count') : null;
+                const unitEl = li ? li.querySelector('.recurrence-unit') : null;
                 
                 const response = await fetch('/api/todo', {
                     method: 'PUT',
@@ -917,7 +1009,10 @@
                     body: JSON.stringify({
                         id: Number(id),
                         title: newTitle,
-                        completed: completed
+                        completed: completed,
+                        due_date: dueInput ? (dueInput.value || null) : null,
+                        recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
                     })
                 });
 
@@ -950,7 +1045,11 @@
             const titleElement = todoItem.querySelector('.todo-text');
             const title = titleElement.textContent;
             const dueDateInput = todoItem.querySelector('.todo-date-input');
-            const dueDate = dueDateInput ? dueDateInput.dataset.due : null;
+            const dueDate = dueDateInput ? (dueDateInput.value || null) : null;
+            const countEl = todoItem.querySelector('.recurrence-count');
+            const unitEl = todoItem.querySelector('.recurrence-unit');
+            const recInt = countEl && countEl.value ? Number(countEl.value) : null;
+            const recUnit = unitEl && unitEl.value ? unitEl.value : null;
 
             try {
                 const response = await fetch('/api/todo', {
@@ -962,7 +1061,9 @@
                         id: id,
                         title: title,
                         completed: checkbox.checked,
-                        due_date: dueDate || null
+                        due_date: dueDate,
+                        recurrence_interval: recInt,
+                        recurrence_unit: recUnit
                     })
                 });
 

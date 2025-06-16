@@ -17,13 +17,15 @@ import (
 )
 
 type Todo struct {
-    ID          int        `json:"id"`
-    Title       string     `json:"title"`
-    Completed   bool       `json:"completed"`
-    CreatedAt   time.Time  `json:"created_at"`
-    CompletedAt *time.Time `json:"completed_at,omitempty"`
-    DueDate     *string    `json:"due_date,omitempty"`
-    ProjectID   int        `json:"project_id"`
+	ID                 int        `json:"id"`
+	Title              string     `json:"title"`
+	Completed          bool       `json:"completed"`
+	CreatedAt          time.Time  `json:"created_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	DueDate            *string    `json:"due_date,omitempty"`
+	RecurrenceInterval *int       `json:"recurrence_interval,omitempty"`
+	RecurrenceUnit     *string    `json:"recurrence_unit,omitempty"`
+	ProjectID          int        `json:"project_id"`
 }
 
 type Project struct {
@@ -270,7 +272,7 @@ func deleteProject(w http.ResponseWriter, r *http.Request) {
 
 func getTodos(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
-		SELECT id, title, completed, created_at, completed_at, due_date, project_id 
+		SELECT id, title, completed, created_at, completed_at, due_date, recurrence_interval, recurrence_unit, project_id 
 		FROM todos 
 		ORDER BY 
 			CASE WHEN completed = 0 THEN 0 ELSE 1 END,  -- Incomplete first
@@ -286,7 +288,7 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var todo Todo
-		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.ProjectID); err != nil {
+		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.RecurrenceInterval, &todo.RecurrenceUnit, &todo.ProjectID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -304,14 +306,14 @@ func addTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date) VALUES (?, ?, ?, ?)")
+	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit) VALUES (?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -331,22 +333,91 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the todo is being marked as completed and completed_at is not set, set it to now
+	// Ensure ProjectID is set (needed for recurring insertion)
+	if todo.ProjectID == 0 {
+		if err := db.QueryRow("SELECT project_id FROM todos WHERE id = ?", todo.ID).Scan(&todo.ProjectID); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Handle recurring logic: if marking completed and recurrence set, complete current and create next occurrence
 	if todo.Completed && todo.CompletedAt == nil {
-		now := time.Now()
-		todo.CompletedAt = &now
-	} else if !todo.Completed {
+		if todo.RecurrenceInterval != nil && todo.RecurrenceUnit != nil {
+			tx, err := db.Begin()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// complete current
+			now := time.Now()
+			todo.CompletedAt = &now
+			_, err = tx.Exec("UPDATE todos SET title=?, completed=1, completed_at=?, due_date=?, recurrence_interval=?, recurrence_unit=? WHERE id=?", todo.Title, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ID)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// compute next due date
+			var nextDue string
+			if todo.DueDate != nil {
+				t, err := time.Parse("2006-01-02", *todo.DueDate)
+				if err != nil {
+					tx.Rollback()
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				interval := *todo.RecurrenceInterval
+				switch *todo.RecurrenceUnit {
+				case "day":
+					t = t.AddDate(0, 0, interval)
+				case "week":
+					t = t.AddDate(0, 0, 7*interval)
+				case "month":
+					t = t.AddDate(0, interval, 0)
+				case "year":
+					t = t.AddDate(interval, 0, 0)
+				}
+				nextDue = t.Format("2006-01-02")
+			}
+			// insert new row
+			_, err = tx.Exec("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit) VALUES (?,?,?,?,?,?)", todo.Title, 0, todo.ProjectID, sql.NullString{String: nextDue, Valid: nextDue != ""}, todo.RecurrenceInterval, todo.RecurrenceUnit)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		} else {
+			// Non-recurring handling
+			now := time.Now()
+			todo.CompletedAt = &now
+		}
+	}
+	if !todo.Completed {
 		todo.CompletedAt = nil
 	}
 
-	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ?, due_date = ? WHERE id = ?")
+	// Clear recurrence fields if interval is 0 or unit is empty
+	if (todo.RecurrenceInterval != nil && *todo.RecurrenceInterval == 0) ||
+		(todo.RecurrenceUnit != nil && *todo.RecurrenceUnit == "") {
+		todo.RecurrenceInterval = nil
+		todo.RecurrenceUnit = nil
+	}
+
+	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ?, due_date = ?, recurrence_interval = ?, recurrence_unit = ? WHERE id = ?")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.DueDate, todo.ID); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
