@@ -552,7 +552,7 @@
 
         // Menu toggle
         // Todo menu handlers
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', async function(e) {
             const menuBtn = e.target.closest('.todo-menu-btn');
             if (menuBtn) {
                 e.stopPropagation();
@@ -585,8 +585,42 @@
 
             const menuItem = e.target.closest('.todo-menu-item');
             if (menuItem) {
-                if (menuItem.dataset.action === 'delete') {
-                    deleteTodo(menuItem.dataset.id);
+                const action = menuItem.dataset.action;
+                if (action === 'delete') {
+                    const todoId = menuItem.dataset.id;
+                    const confirmed = confirm('Are you sure you want to delete this todo?');
+                    if (!confirmed) {
+                        // Keep menu open if user cancels
+                        return;
+                    }
+                    deleteTodo(todoId);
+                } else if (action === 'save') {
+                    const li = menuItem.closest('.todo-item');
+                    if (!li) return;
+                    const todoId = menuItem.dataset.id;
+                    const checkbox = li.querySelector('.todo-checkbox');
+                    const titleEl = li.querySelector('.todo-text');
+                    const dateInput = li.querySelector('.todo-date-input');
+                    const countEl = li.querySelector('.recurrence-count');
+                    const unitEl = li.querySelector('.recurrence-unit');
+                    try {
+                        await fetch('/api/todo', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                id: Number(todoId),
+                                title: titleEl ? titleEl.textContent : '',
+                                completed: checkbox ? checkbox.checked : false,
+                                due_date: dateInput ? (dateInput.value || null) : null,
+                                recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                                recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
+                            })
+                        });
+                        await loadTodosByProject();
+                    } catch(err){console.error(err);}            
+                } else if (action === 'cancel') {
+                    document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
+                    await loadTodosByProject();
                 }
             }
 
@@ -600,90 +634,19 @@
             overlay.classList.toggle('active');
         });
 
-        // Global handler: save due date or recurrence changes immediately
-        document.addEventListener('change', async function(e) {
-            const target = e.target;
-            // Handle due date
-            if (target.classList.contains('todo-date-input')) {
-                const todoId = target.dataset.id;
-                const li = target.closest('.todo-item');
-                if (!todoId || !li) return;
-                const checkbox = li.querySelector('.todo-checkbox');
-                const titleEl = li.querySelector('.todo-text');
-                const countEl = li.querySelector('.recurrence-count');
-                const unitEl = li.querySelector('.recurrence-unit');
-                try {
-                    await fetch('/api/todo', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id: Number(todoId),
-                            title: titleEl ? titleEl.textContent : '',
-                            completed: checkbox ? checkbox.checked : false,
-                            due_date: target.value || null,
-                            recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                            recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
-                        })
-                    });
-                    await loadTodosByProject();
-                } catch(err){console.error(err);}
-                return;
-            }
-            // Handle recurrence change (number or unit)
-            if (target.classList.contains('recurrence-count') || target.classList.contains('recurrence-unit')) {
-                const li = target.closest('.todo-item');
-                const todoId = target.dataset.id;
-                if (!li || !todoId) return;
-                const checkbox = li.querySelector('.todo-checkbox');
-                const titleEl = li.querySelector('.todo-text');
-                const dateInput = li.querySelector('.todo-date-input');
-                const countEl = li.querySelector('.recurrence-count');
-                const unitEl = li.querySelector('.recurrence-unit');
-                try {
-                    await fetch('/api/todo', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id: Number(todoId),
-                            title: titleEl ? titleEl.textContent : '',
-                            completed: checkbox ? checkbox.checked : false,
-                            due_date: dateInput ? dateInput.value : null,
-                            recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                            recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
-                        })
-                    });
-                    await loadTodosByProject();
-                } catch(err){console.error(err);}            
-            }
-        });
-        document.addEventListener('change', async function(e) {
+        // When due date input cleared, blank out recurrence inputs (UI only)
+        document.addEventListener('change', function(e){
             const input = e.target;
-            if (!(input instanceof HTMLInputElement) || !input.classList.contains('todo-date-input')) return;
-
-            const todoId = input.dataset.id;
-            const li = input.closest('.todo-item');
-            if (!todoId || !li) return;
-            const checkbox = li.querySelector('input[type="checkbox"]');
-            const titleEl = li.querySelector('.todo-text');
-            const countEl = li.querySelector('.recurrence-count');
-            const unitEl = li.querySelector('.recurrence-unit');
-
-            try {
-                await fetch('/api/todo', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        id: Number(todoId),
-                        title: titleEl ? titleEl.textContent : '',
-                        completed: checkbox ? checkbox.checked : false,
-                        due_date: input.value || null,
-                        recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
-                    })
-                });
-                await loadTodosByProject();
-            } catch (err) {
-                console.error('Failed to set due date', err);
+            if(input && input.classList && input.classList.contains('todo-date-input')){
+                if(!input.value){
+                    const li = input.closest('.todo-item');
+                    if(li){
+                        const countEl = li.querySelector('.recurrence-count');
+                        const unitEl = li.querySelector('.recurrence-unit');
+                        if(countEl) countEl.value='';
+                        if(unitEl) unitEl.value='day';
+                    }
+                }
             }
         });
 
@@ -858,7 +821,9 @@
                                         <option value="year" ${todo.recurrence_unit==='year' ? 'selected':''}>year(s)</option>
                                     </select>
                                 </div>
-                                <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
+                                <div class="todo-menu-item" data-action="save" data-id="${todo.id}" style="font-weight:bold;color:var(--primary-color);">Save</div>
+                        <div class="todo-menu-item" data-action="cancel">Cancel</div>
+                        <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
                             </div>
                         `;
                     
@@ -1132,22 +1097,19 @@
         }
 
         async function deleteTodo(id) {
-            if (!confirm('Are you sure you want to delete this todo?')) {
-                return;
-            }
 
-    try {
-        const response = await fetch(`/api/todo?id=${id}`, {
-            method: 'DELETE'
-        });
+            try {
+                const response = await fetch(`/api/todo?id=${id}`, {
+                    method: 'DELETE'
+                });
 
-        if (!response.ok) {
-            throw new Error('Failed to delete todo');
-        }
+                if (!response.ok) {
+                    throw new Error('Failed to delete todo');
+                }
 
-        await loadTodosByProject();
-    } catch (error) {
-        console.error('Error deleting todo:', error);
+                await loadTodosByProject();
+            } catch (error) {
+                console.error('Error deleting todo:', error);
                 alert('Failed to delete todo. Please try again.');
             }
         }
