@@ -249,6 +249,9 @@
         .todo-item:hover {
             background-color: var(--toggle-hover);
         }
+        .todo-item.dragging {
+            opacity: 0.5;
+        }
         .todo-item .todo-checkbox {
             margin-right: 10px;
             align-self: flex-start;
@@ -650,6 +653,104 @@
             }
         });
 
+        // Drag & Drop handlers
+        document.addEventListener('dragstart', function(e){
+            const item = e.target.closest('.todo-item');
+            if(item){
+                e.dataTransfer.setData('application/json', JSON.stringify({
+                    id: item.dataset.id,
+                    fromProject: item.dataset.projectId,
+                    fromCompleted: item.dataset.completed
+                }));
+                e.dataTransfer.effectAllowed = 'move';
+                item.classList.add('dragging');
+            }
+        });
+        document.addEventListener('dragend', function(e){
+            const item = e.target.closest('.todo-item');
+            if(item){
+                item.classList.remove('dragging');
+            }
+        });
+        document.addEventListener('dragover', function(e){
+            if(e.target.closest('.todo-list') || e.target.closest('.todo-item')){
+                e.preventDefault();
+            }
+        });
+        document.addEventListener('drop', async function(e){
+            const dropTargetItem = e.target.closest('.todo-item');
+            let list = e.target.closest('.todo-list');
+            if(!list && dropTargetItem){
+                list = dropTargetItem.parentElement.closest('.todo-list');
+            }
+            if(!list) return;
+            e.preventDefault();
+            const dataStr = e.dataTransfer.getData('application/json');
+            if(!dataStr) return;
+            let data;
+            try{ data = JSON.parse(dataStr);}catch(err){ return; }
+            const todoId = Number(data.id);
+            const targetProject = Number(list.dataset.projectId);
+            const targetCompleted = list.dataset.completed === '1';
+            const sameList = Number(data.fromProject) === targetProject && (data.fromCompleted === (targetCompleted ? '1':'0'));
+            if(Number.isNaN(todoId) || Number.isNaN(targetProject)) return;
+            try{
+                // gather current todo details so we don't lose them when moving
+            const itemEl = document.querySelector(`.todo-item[data-id="${todoId}"]`);
+            const titleEl = itemEl ? itemEl.querySelector('.todo-text') : null;
+            const title = titleEl ? titleEl.textContent : '';
+            const dateInput = itemEl ? itemEl.querySelector('.todo-date-input') : null;
+            let dueDate = null;
+            if (dateInput) {
+                dueDate = dateInput.value || (dateInput.dataset.due ? dateInput.dataset.due.split('T')[0] : null) || null;
+            }
+            const countEl = itemEl ? itemEl.querySelector('.recurrence-count') : null;
+            const unitEl = itemEl ? itemEl.querySelector('.recurrence-unit') : null;
+            const recInt = countEl && countEl.value ? Number(countEl.value) : null;
+            const recUnitVal = unitEl && unitEl.value ? unitEl.value : null;
+
+            const response = await fetch('/api/todo', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: todoId,
+                    title: title,
+                    completed: targetCompleted,
+                    project_id: targetProject,
+                    due_date: dueDate,
+                    recurrence_interval: recInt,
+                    recurrence_unit: recUnitVal
+                })
+            });
+                if(!response.ok){ throw new Error('Failed to move todo'); }
+                const draggedEl = itemEl;
+                if(draggedEl){
+                    if(dropTargetItem && dropTargetItem !== draggedEl){
+                        const rect = dropTargetItem.getBoundingClientRect();
+                        const before = e.clientY < rect.top + rect.height / 2;
+                        if(before){
+                            dropTargetItem.parentElement.insertBefore(draggedEl, dropTargetItem);
+                        }else{
+                            dropTargetItem.parentElement.insertBefore(draggedEl, dropTargetItem.nextSibling);
+                        }
+                    }else{
+                        list.appendChild(draggedEl);
+                    }
+                }
+
+                // collect IDs after DOM move
+                const ids = Array.from(list.querySelectorAll('.todo-item')).map(el=>Number(el.dataset.id));
+                fetch('/api/todos/reorder', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(ids)});
+
+                if(!sameList){
+                    await loadTodosByProject();
+                }
+            }catch(err){
+                console.error('Error moving todo:', err);
+                alert('Failed to move todo. Please try again.');
+            }
+        });
+
         // Close menu when clicking outside
         document.getElementById('menuOverlay').addEventListener('click', function(e) {
             if (e.target === this) {
@@ -753,7 +854,7 @@
                 const activeList = document.createElement('div');
                 activeList.className = 'active-todos';
                 activeList.innerHTML = `
-                    <ul class="todo-list"></ul>
+                    <ul class="todo-list" data-project-id="${project.id}" data-completed="0"></ul>
                 `;
                 
                 const completedList = document.createElement('div');
@@ -764,7 +865,7 @@
                         <span class="toggle-text">Completed</span>
                         <span class="count-badge"></span>
                     </button>
-                    <ul class="todo-list"></ul>
+                    <ul class="todo-list" data-project-id="${project.id}" data-completed="1"></ul>
                 `;
 
                 const activeTodos = activeList.querySelector('.todo-list');
@@ -781,6 +882,10 @@
                 filteredTodos.forEach(todo => {
                     const li = document.createElement('li');
                     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
+                    li.setAttribute('draggable', 'true');
+                    li.dataset.id = todo.id;
+                    li.dataset.projectId = project.id;
+                    li.dataset.completed = todo.completed ? '1' : '0';
                     let dueDateHtml = '';
                     let recurrenceHtml = '';
                     if (todo.due_date) {

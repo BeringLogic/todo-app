@@ -25,6 +25,7 @@ type Todo struct {
 	DueDate            *string    `json:"due_date,omitempty"`
 	RecurrenceInterval *int       `json:"recurrence_interval,omitempty"`
 	RecurrenceUnit     *string    `json:"recurrence_unit,omitempty"`
+	Position           int        `json:"position"`
 	ProjectID          int        `json:"project_id"`
 }
 
@@ -272,12 +273,9 @@ func deleteProject(w http.ResponseWriter, r *http.Request) {
 
 func getTodos(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
-		SELECT id, title, completed, created_at, completed_at, due_date, recurrence_interval, recurrence_unit, project_id 
+		SELECT id, title, completed, created_at, completed_at, due_date, recurrence_interval, recurrence_unit, project_id, position 
 		FROM todos 
-		ORDER BY 
-			CASE WHEN completed = 0 THEN 0 ELSE 1 END,  -- Incomplete first
-			CASE WHEN completed = 1 THEN completed_at END DESC,  -- Completed items by completed_at DESC
-			created_at DESC  -- Then by creation time
+		ORDER BY project_id, completed, position
 	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -288,7 +286,7 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	var todos []Todo
 	for rows.Next() {
 		var todo Todo
-		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.RecurrenceInterval, &todo.RecurrenceUnit, &todo.ProjectID); err != nil {
+		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.RecurrenceInterval, &todo.RecurrenceUnit, &todo.ProjectID, &todo.Position); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -306,14 +304,19 @@ func addTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit) VALUES (?, ?, ?, ?, ?, ?)")
+	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit); err != nil {
+	// Determine next position within project & completed status=false
+	var maxPos int
+	_ = db.QueryRow("SELECT COALESCE(MAX(position),0) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&maxPos)
+	todo.Position = maxPos + 1
+
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.Position); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -410,14 +413,14 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 		todo.RecurrenceUnit = nil
 	}
 
-	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ?, due_date = ?, recurrence_interval = ?, recurrence_unit = ? WHERE id = ?")
+	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ?, due_date = ?, recurrence_interval = ?, recurrence_unit = ?, project_id = ?, position = ? WHERE id = ?")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ID); err != nil {
+	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ProjectID, todo.Position, todo.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -498,6 +501,8 @@ func createRouter() http.Handler {
 		getTodos(w, r)
 	})
 
+	mux.HandleFunc("/api/todos/reorder", reorderTodos)
+
 	mux.HandleFunc("/api/todo", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
@@ -512,4 +517,49 @@ func createRouter() http.Handler {
 	})
 
 	return mux
+}
+
+func reorderTodos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var ids []int
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+	if len(ids) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	stmt, err := tx.Prepare("UPDATE todos SET position = ? WHERE id = ?")
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	for pos, id := range ids {
+		if _, err := stmt.Exec(pos+1, id); err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
