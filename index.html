@@ -816,8 +816,12 @@
                         }else{
                             dropTargetItem.parentElement.insertBefore(draggedEl, dropTargetItem.nextSibling);
                         }
-                    }else{
+                    } else if(!dropTargetItem){
+                        // Dropped on empty space within the list – move to end
                         list.appendChild(draggedEl);
+                    } else {
+                        // dropped on itself – do nothing
+                        return;
                     }
                 }
 
