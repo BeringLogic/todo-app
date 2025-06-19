@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -35,6 +36,9 @@ type Project struct {
 	Position  int       `json:"position"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
 var db *sql.DB
 
@@ -61,8 +65,14 @@ func runMigrations() error {
 		return fmt.Errorf("failed to create migrate driver: %v", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		"file://./migrations",
+	sourceDriver, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create iofs source driver: %v", err)
+	}
+
+	m, err := migrate.NewWithInstance(
+		"iofs",
+		sourceDriver,
 		"sqlite3",
 		driver,
 	)
@@ -493,48 +503,48 @@ func deleteTodo(w http.ResponseWriter, r *http.Request) {
 }
 
 func reorderProjects(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPut {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    var ids []int
-    if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-        http.Error(w, "invalid payload", http.StatusBadRequest)
-        return
-    }
-    if len(ids) == 0 {
-        w.WriteHeader(http.StatusOK)
-        return
-    }
+	var ids []int
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+	if len(ids) == 0 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-    tx, err := db.Begin()
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    stmt, err := tx.Prepare("UPDATE projects SET position = ? WHERE id = ?")
-    if err != nil {
-        tx.Rollback()
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer stmt.Close()
+	stmt, err := tx.Prepare("UPDATE projects SET position = ? WHERE id = ?")
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
 
-    for pos, id := range ids {
-        if _, err := stmt.Exec(pos+1, id); err != nil {
-            tx.Rollback()
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-    }
+	for pos, id := range ids {
+		if _, err := stmt.Exec(pos+1, id); err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
-    if err := tx.Commit(); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    w.WriteHeader(http.StatusOK)
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func main() {
@@ -589,7 +599,7 @@ func createRouter() http.Handler {
 	})
 
 	mux.HandleFunc("/api/todos/reorder", reorderTodos)
-    mux.HandleFunc("/api/projects/reorder", reorderProjects)
+	mux.HandleFunc("/api/projects/reorder", reorderProjects)
 
 	mux.HandleFunc("/api/todo", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

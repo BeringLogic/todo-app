@@ -21,9 +21,12 @@
             --toggle-hover: #f8f9fa;
             --input-bg: #f8f9fa;
             --input-text: #4c4f69;
-            --yellow-color: #e5c890;
-            --red-color: #e78284;
+            --yellow-color: #df8e1d;
+            --red-color: #d20f39;
             --blue-color: #8caaee;
+            --link-color: #1e66f5;
+            --link-hover: #04a5e5;
+            --link-visited: #7287fd;
         }
 
         /* Catppuccin Mocha (dark) theme */
@@ -47,6 +50,9 @@
             --yellow-color: #e5c890;
             --red-color: #e78284;
             --blue-color: #8caaee;
+            --link-color: #89b4fa;
+            --link-hover: #89dceb;
+            --link-visited: #b4befe;
         }
 
         body {
@@ -182,36 +188,28 @@
             transition: background-color 0.2s;
         }
 
-        .project-title:hover {
-            background-color: var(--toggle-bg);
-        }
-
         .project-title.editing {
             display: none;
         }
 
         textarea.project-title {
-            width: 180px;
-            height: 20px;
+            width: 150px;
+            height: auto;
+            border-radius: 4px;
             border: 1px solid var(--border-color);
             background-color: var(--input-bg);
             color: var(--input-text);
-            border-radius: 4px;
-            font-size: inherit;
+            font-size: 18px;
             font-family: inherit;
+            padding: 6px;
         }
 
         .delete-project-btn {
-            display: none;
             margin: 0 0 0 8px;
             background: none;
             border: none;
             color: var(--secondary-color);
             cursor: pointer;
-        }
-
-        .project-title-container:hover .delete-project-btn {
-            display: block;
         }
 
         .todo-form {
@@ -293,6 +291,16 @@
             font-family: inherit;
         }
 
+        .todo-item pre a {
+            color: var(--link-color);
+        }
+        .todo-item pre a:hover {
+            color: var(--link-hover);
+        }
+        .todo-item pre a:visited {
+            color: var(--link-visited);
+        }
+
         .todo-item textarea {
             border: none;
             background-color: var(--input-bg);
@@ -362,6 +370,15 @@
         }
         .todo-menu-item:hover {
             background-color: var(--toggle-bg);
+        }
+        .todo-menu-item[data-action="save"] {
+           color: var(--primary-color); 
+           font-weight: bold;
+        }
+        .todo-menu-item[data-action="save"],
+        .todo-menu-item[data-action="cancel"],
+        .todo-menu-item[data-action="delete"] {
+            text-align: right;
         }
 
         .todo-date-input {
@@ -463,6 +480,15 @@
 
         let editingProject = null;
 
+        // Convert URLs in plain text to clickable links
+        function linkify(text) {
+            const urlPattern = /(https?:\/\/[^\s]+)/g;
+            return text.replace(urlPattern, (url) => {
+                const safe = url.replace(/"/g, '&quot;');
+                return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+            });
+        }
+
         function startProjectEdit(element) {
             if (editingProject) return;
 
@@ -470,6 +496,7 @@
             const textarea = document.createElement('textarea');
             textarea.value = title;
             textarea.className = 'project-title';
+            
             element.classList.add('editing');
             element.parentElement.insertBefore(textarea, element.nextSibling);
             
@@ -948,6 +975,7 @@
                 projectGroup.innerHTML = `
                     <div class="project-title-container">
                         <div class="project-title" data-id="${project.id}" ${project.id!=='nextweek' ? 'draggable="true"' : ''}>${project.title}</div>
+                        <div class="active-count-badge"></div>
                         <button class="delete-project-btn" data-id="${project.id}">✕</button>
                     </div>
                     <div class="todo-form">
@@ -967,7 +995,7 @@
                     <button class="toggle-completed-btn" data-id="${project.id}">
                         <span class="arrow">▼</span>
                         <span class="toggle-text">Completed</span>
-                        <span class="count-badge"></span>
+                        <span class="completed-count-badge"></span>
                     </button>
                     <ul class="todo-list" data-project-id="${project.id}" data-completed="1"></ul>
                 `;
@@ -1007,14 +1035,14 @@
                     li.innerHTML = `
                             <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
                             <div class="todo-content">
-                                <pre class="todo-text" data-id="${todo.id}">${todo.title}</pre>
+                                <pre class="todo-text" data-id="${todo.id}">${linkify(todo.title)}</pre>
                                 <div>${dueDateHtml}${recurrenceHtml}</div>
                             </div>
                             <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
                             <div class="todo-menu">
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
                                     <span>Due</span>
-                                    <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" style="">
+                                    <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}">
                                 </div>
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
                                     <span>Repeat</span>
@@ -1026,9 +1054,9 @@
                                         <option value="year" ${todo.recurrence_unit==='year' ? 'selected':''}>year(s)</option>
                                     </select>
                                 </div>
-                                <div class="todo-menu-item" data-action="save" data-id="${todo.id}" style="font-weight:bold;color:var(--primary-color);">Save</div>
-                        <div class="todo-menu-item" data-action="cancel">Cancel</div>
-                        <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
+                                <div class="todo-menu-item" data-action="save" data-id="${todo.id}">Save</div>
+                                <div class="todo-menu-item" data-action="cancel">Cancel</div>
+                                <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
                             </div>
                         `;
                     
@@ -1039,10 +1067,14 @@
                     }
                 });
 
+                const projectTitleContainer = projectGroup.querySelector('.project-title-container');
+                const activeCountBadge = projectTitleContainer.querySelector('.active-count-badge');
+                activeCountBadge.textContent = `(${filteredTodos.filter(t => !t.completed).length})`;
+
                 // Update toggle button count
                 const toggleBtn = completedList.querySelector('.toggle-completed-btn');
-                const countBadge = toggleBtn.querySelector('.count-badge');
-                countBadge.textContent = `(${filteredTodos.filter(t => t.completed).length})`;
+                const completedCountBadge = toggleBtn.querySelector('.completed-count-badge');
+                completedCountBadge.textContent = `(${filteredTodos.filter(t => t.completed).length})`;
 
                 projectGroup.appendChild(activeList);
                 projectGroup.appendChild(completedList);
@@ -1064,15 +1096,17 @@
 
                 activeTodos.querySelectorAll('.todo-text').forEach(list => {
                     list.addEventListener('click', function(e) {
-                        const id = e.target.dataset.id;
-                        editTodo(id, e.target);
+                        if (e.target.closest('a')) return; // Allow link clicks
+                        const id = this.dataset.id;
+                        editTodo(id, this);
                     });
                 });
 
                 completedTodos.querySelectorAll('.todo-text').forEach(list => {
                     list.addEventListener('click', function(e) {
-                        const id = e.target.dataset.id;
-                        editTodo(id, e.target);
+                        if (e.target.closest('a')) return; // Allow link clicks
+                        const id = this.dataset.id;
+                        editTodo(id, this);
                     });
                 });
 
@@ -1190,8 +1224,8 @@
                     e.preventDefault();
                     const pre = document.createElement('pre');
                     pre.className = 'todo-text';
-                    pre.textContent = originalText;
-                    pre.onclick = () => editTodo(id, pre);
+                    pre.innerHTML = linkify(originalText);
+                    pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                     textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
                 if (liDone) liDone.setAttribute('draggable', 'true');
@@ -1202,8 +1236,8 @@
             textarea.addEventListener('blur', async function() {
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.textContent = originalText;
-                pre.onclick = () => editTodo(id, pre);
+                pre.innerHTML = linkify(originalText);
+                pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
                 if (liDone) liDone.setAttribute('draggable', 'true');
@@ -1217,8 +1251,8 @@
                 // Restore original text if no changes or empty
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.textContent = originalText;
-                pre.onclick = () => editTodo(id, pre);
+                pre.innerHTML = linkify(originalText);
+                pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
                 if (liDone) liDone.setAttribute('draggable', 'true');
@@ -1257,8 +1291,8 @@
                 // Replace input with new pre
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.textContent = newTitle;
-                pre.onclick = () => editTodo(id, pre);
+                pre.innerHTML = linkify(newTitle);
+                pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
                 if (liDone) liDone.setAttribute('draggable', 'true');
@@ -1268,8 +1302,8 @@
                 // Restore original text
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.textContent = originalText;
-                pre.onclick = () => editTodo(id, pre);
+                pre.innerHTML = linkify(originalText);
+                pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
                 if (liDone) liDone.setAttribute('draggable', 'true');
