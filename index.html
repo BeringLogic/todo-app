@@ -21,8 +21,9 @@
             --toggle-hover: #f8f9fa;
             --input-bg: #f8f9fa;
             --input-text: #4c4f69;
-            --yellow-color: #df8e1d;
-            --red-color: #d20f39;
+            --yellow-color: #e5c890;
+            --red-color: #e78284;
+            --blue-color: #8caaee;
         }
 
         /* Catppuccin Mocha (dark) theme */
@@ -43,8 +44,9 @@
             --input-text: #cdd6f4;
             --primary-text: #1e1e2e;
             --secondary-text: #313244;
-            --yellow-color: #df8e1d;
-            --red-color: #d20f39;
+            --yellow-color: #e5c890;
+            --red-color: #e78284;
+            --blue-color: #8caaee;
         }
 
         body {
@@ -157,8 +159,8 @@
         }
 
         .project-item {
-            width: 200px;
-            min-width: 200px;
+            width: 210px;
+            min-width: 210px;
             padding: 12px;
             cursor: pointer;
             height: 97%;
@@ -175,7 +177,6 @@
         .project-title {
             font-size: 18px;
             font-weight: bold;
-            margin-bottom: 12px;
             padding: 8px;
             border-radius: 4px;
             transition: background-color 0.2s;
@@ -202,7 +203,7 @@
 
         .delete-project-btn {
             display: none;
-            margin: -12px 0 0 8px;
+            margin: 0 0 0 8px;
             background: none;
             border: none;
             color: var(--secondary-color);
@@ -214,10 +215,10 @@
         }
 
         .todo-form {
-            margin-bottom: 20px;
+            margin-bottom: 2px;
         }
         .todo-input {
-            width: 192px;
+            width: 204px;
             border-radius: 4px;
             background-color: var(--input-bg);
             color: var(--input-text);
@@ -233,7 +234,7 @@
             min-height: 20px;
         }
         .completed-todos .todo-list {
-            margin-top: 10px;
+            opacity: 0.7;
         }
 
         .todo-item {
@@ -254,9 +255,26 @@
             opacity: 0.5;
         }
         .todo-item .todo-checkbox {
+            border: 1px solid var(--border-color);
+            background-color: var(--toggle-bg);
             margin-right: 10px;
             align-self: flex-start;
             margin-top: 4px;
+            appearance: none;
+            min-width: 18px;
+            min-height: 18px;
+        }
+        .todo-item .todo-checkbox:checked {
+            background-color: var(--blue-color);
+        }
+        .todo-item .todo-checkbox:checked::after {
+            content: "\2714";
+            color: var(--toggle-bg);
+            padding: 0 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
         }
 
         .todo-item .todo-content {
@@ -267,11 +285,10 @@
 
         .todo-item pre {
             margin: 0;
-            padding: 2px 0 0 0;
+            padding: 4px 0 0 0;
             white-space: pre-wrap;
             word-break: break-word;
             flex-grow: 1;
-            line-height: 1.4;
             font-size: inherit;
             font-family: inherit;
         }
@@ -373,21 +390,24 @@
         
         .toggle-completed-btn {
             width: 100%;
+            margin-bottom: 4px;
+            padding: 2px 0 0 7px;
             background-color: var(--toggle-bg);
-            border: 1px solid var(--border-color);
             color: var(--text-color);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             cursor: pointer;
-            text-align: left;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
         }
         .toggle-completed-btn:hover {
             background-color: var(--toggle-hover);
         }
         .arrow {
             transition: transform 0.2s;
+            width: 12px;
+            height: 18px;
         }
         
         .todo-item.completed pre,
@@ -437,9 +457,6 @@
             group.querySelector('.todo-form')?.remove();
             group.querySelector('.toggle-completed-btn')?.remove();
             group.querySelector('.completed-todos')?.remove();
-
-            // Disable dragging for todos in this special list
-            group.querySelectorAll('.todo-item').forEach(item => item.setAttribute('draggable','false'));
 
             return group;
         }
@@ -654,6 +671,15 @@
                         if(unitEl) unitEl.value='day';
                     }
                 }
+            }
+        });
+
+        // Auto-resize textarea height as the user types
+        document.addEventListener('input', function(e){
+            const ta = e.target;
+            if(ta && ta.tagName === 'TEXTAREA'){
+                ta.style.height = 'auto';
+                ta.style.height = ta.scrollHeight + 'px';
             }
         });
 
@@ -922,7 +948,7 @@
                         }
                         dueDateHtml = `<span class="due-date ${dueDateClass}">🗓 ${dueLocal}</span>`;
                         if (todo.recurrence_interval && todo.recurrence_unit) {
-                            recurrenceHtml = `<span class="recurrence-info">⟳ ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</span>`;
+                            recurrenceHtml = `<span class="recurrence-info">&#x1f504; ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</span>`;
                         }
                     }
 
