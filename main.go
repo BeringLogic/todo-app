@@ -492,6 +492,51 @@ func deleteTodo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func reorderProjects(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPut {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    var ids []int
+    if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+        http.Error(w, "invalid payload", http.StatusBadRequest)
+        return
+    }
+    if len(ids) == 0 {
+        w.WriteHeader(http.StatusOK)
+        return
+    }
+
+    tx, err := db.Begin()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    stmt, err := tx.Prepare("UPDATE projects SET position = ? WHERE id = ?")
+    if err != nil {
+        tx.Rollback()
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer stmt.Close()
+
+    for pos, id := range ids {
+        if _, err := stmt.Exec(pos+1, id); err != nil {
+            tx.Rollback()
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+    }
+
+    if err := tx.Commit(); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+}
+
 func main() {
 	// Create a new HTTP server
 	server := &http.Server{
@@ -544,6 +589,7 @@ func createRouter() http.Handler {
 	})
 
 	mux.HandleFunc("/api/todos/reorder", reorderTodos)
+    mux.HandleFunc("/api/projects/reorder", reorderProjects)
 
 	mux.HandleFunc("/api/todo", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

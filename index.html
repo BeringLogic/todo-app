@@ -685,8 +685,15 @@
 
         // Drag & Drop handlers
         document.addEventListener('dragstart', function(e){
-            // Ignore drag events that originate from a textarea being edited (so users can drag-select text)
             if (e.target.closest('textarea')) return;
+            const projectTitle = e.target.closest('.project-title');
+            if (projectTitle && projectTitle.getAttribute('draggable') === 'true') {
+                const id = projectTitle.dataset.id;
+                e.dataTransfer.setData('application/json', JSON.stringify({ type: 'project', projectId: id }));
+                e.dataTransfer.effectAllowed = 'move';
+                projectTitle.closest('.project-item').classList.add('dragging');
+                return; // handled project drag
+            }
             const item = e.target.closest('.todo-item');
             if(item){
                 e.dataTransfer.setData('application/json', JSON.stringify({
@@ -700,6 +707,10 @@
         });
         document.addEventListener('dragend', function(e){
             if (e.target.closest('textarea')) return;
+            const proj = e.target.closest('.project-item');
+            if (proj && proj.classList.contains('dragging')) {
+                proj.classList.remove('dragging');
+            }
             const item = e.target.closest('.todo-item');
             if(item){
                 item.classList.remove('dragging');
@@ -707,12 +718,49 @@
         });
         document.addEventListener('dragover', function(e){
             if (e.target.closest('textarea')) return; // allow default drag over textarea
-            if(e.target.closest('.todo-list') || e.target.closest('.todo-item')){
+            if(e.target.closest('.todo-list') || e.target.closest('.todo-item') || e.target.closest('.project-item')){
                 e.preventDefault();
             }
         });
         document.addEventListener('drop', async function(e){
             if (e.target.closest('textarea')) return;
+            let payload = null;
+            try {
+                payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
+            } catch {}
+
+            // PROJECT REORDER
+            if (payload && payload.type === 'project') {
+                const projectsContainer = document.querySelector('.projects-container');
+                const targetProjectItem = e.target.closest('.project-item');
+                if (!targetProjectItem) return;
+
+                const draggedEl = projectsContainer.querySelector(`.project-title[data-id="${payload.projectId}"]`)?.closest('.project-item');
+                if (!draggedEl || draggedEl === targetProjectItem) return;
+
+                const rect = targetProjectItem.getBoundingClientRect();
+                if (e.clientX > rect.left + rect.width / 2) {
+                    projectsContainer.insertBefore(draggedEl, targetProjectItem.nextSibling);
+                } else {
+                    projectsContainer.insertBefore(draggedEl, targetProjectItem);
+                }
+
+                // Build new order excluding special/non-numeric projects
+                const ids = Array.from(projectsContainer.querySelectorAll('.project-title'))
+                                  .map(el => el.dataset.id)
+                                  .filter(id => !isNaN(parseInt(id)))
+                                  .map(id => parseInt(id));
+                try {
+                    await fetch('/api/projects/reorder', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(ids)
+                    });
+                } catch (err) {
+                    console.error('Error reordering projects:', err);
+                }
+                return; // prevent todo handling
+            }
             const dropTargetItem = e.target.closest('.todo-item');
             let list = e.target.closest('.todo-list');
             if(!list && dropTargetItem){
@@ -895,7 +943,7 @@
                 projectGroup.className = 'project-item';
                 projectGroup.innerHTML = `
                     <div class="project-title-container">
-                        <div class="project-title" data-id="${project.id}">${project.title}</div>
+                        <div class="project-title" data-id="${project.id}" ${project.id!=='nextweek' ? 'draggable="true"' : ''}>${project.title}</div>
                         <button class="delete-project-btn" data-id="${project.id}">✕</button>
                     </div>
                     <div class="todo-form">
