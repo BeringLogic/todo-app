@@ -438,6 +438,9 @@
             group.querySelector('.toggle-completed-btn')?.remove();
             group.querySelector('.completed-todos')?.remove();
 
+            // Disable dragging for todos in this special list
+            group.querySelectorAll('.todo-item').forEach(item => item.setAttribute('draggable','false'));
+
             return group;
         }
 
@@ -847,6 +850,10 @@
                 // Create a project group for each project
                 for (const project of projects) {
                     const projectTodos = todos.filter(todo => todo.project_id === project.id);
+                
+                    // Sort todos by their position field ascending so both active and completed lists respect persisted order
+                    projectTodos.sort((a, b) => (a.position || 0) - (b.position || 0));
+
                     const projectGroup = await loadProject(project, projectTodos);
                     projectsContainer.appendChild(projectGroup);
                 }
@@ -890,9 +897,6 @@
                 const activeTodos = activeList.querySelector('.todo-list');
                 const completedTodos = completedList.querySelector('.todo-list');
 
-                // Sort todos by their position field ascending so both active and completed lists respect persisted order
-                filteredTodos.sort((a, b) => (a.position || 0) - (b.position || 0));
-
                 filteredTodos.forEach(todo => {
                     const li = document.createElement('li');
                     li.className = `todo-item ${todo.completed ? 'completed' : ''}`;
@@ -906,7 +910,10 @@
                     if (todo.due_date) {
                         // Use the raw date string (YYYY-MM-DD) to avoid timezone shift
                         const dueLocal = todo.due_date.split('T')[0];
-                        const todayLocal = new Date().toISOString().split('T')[0];
+                        // Build local date string (YYYY-MM-DD) without converting to UTC
+                        const now = new Date();
+                        const pad = (n) => String(n).padStart(2, '0');
+                        const todayLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
                         let dueDateClass = '';
                         if (dueLocal === todayLocal) {
                             dueDateClass = "today";
