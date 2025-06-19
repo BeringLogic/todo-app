@@ -230,6 +230,7 @@
             list-style: none;
             padding: 0;
             margin: 0;
+            min-height: 20px;
         }
         .completed-todos .todo-list {
             margin-top: 10px;
@@ -655,6 +656,8 @@
 
         // Drag & Drop handlers
         document.addEventListener('dragstart', function(e){
+            // Ignore drag events that originate from a textarea being edited (so users can drag-select text)
+            if (e.target.closest('textarea')) return;
             const item = e.target.closest('.todo-item');
             if(item){
                 e.dataTransfer.setData('application/json', JSON.stringify({
@@ -667,17 +670,20 @@
             }
         });
         document.addEventListener('dragend', function(e){
+            if (e.target.closest('textarea')) return;
             const item = e.target.closest('.todo-item');
             if(item){
                 item.classList.remove('dragging');
             }
         });
         document.addEventListener('dragover', function(e){
+            if (e.target.closest('textarea')) return; // allow default drag over textarea
             if(e.target.closest('.todo-list') || e.target.closest('.todo-item')){
                 e.preventDefault();
             }
         });
         document.addEventListener('drop', async function(e){
+            if (e.target.closest('textarea')) return;
             const dropTargetItem = e.target.closest('.todo-item');
             let list = e.target.closest('.todo-list');
             if(!list && dropTargetItem){
@@ -738,11 +744,24 @@
                     }
                 }
 
-                // collect IDs after DOM move
-                const ids = Array.from(list.querySelectorAll('.todo-item')).map(el=>Number(el.dataset.id));
-                fetch('/api/todos/reorder', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(ids)});
+                // collect IDs after DOM move and update each element's data-position
+                const ids = Array.from(list.querySelectorAll('.todo-item')).map((el, idx) => {
+                    el.dataset.position = idx + 1; // keep dataset in sync with visual order
+                    return Number(el.dataset.id);
+                });
+
+                // Persist the new order in the backend
+                const reorderPromise = fetch('/api/todos/reorder', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(ids)
+                });
+
+                // Always wait for the backend to finish updating positions
+                await reorderPromise;
 
                 if(!sameList){
+                    // Moving between lists or projects – reload full UI to refresh counts etc.
                     await loadTodosByProject();
                 }
             }catch(err){
@@ -871,13 +890,8 @@
                 const activeTodos = activeList.querySelector('.todo-list');
                 const completedTodos = completedList.querySelector('.todo-list');
 
-                // Sort completed todos by completed_at in descending order
-                filteredTodos.sort((a, b) => {
-                    if (a.completed && b.completed) {
-                        return new Date(b.completed_at || 0) - new Date(a.completed_at || 0);
-                    }
-                    return 0;
-                });
+                // Sort todos by their position field ascending so both active and completed lists respect persisted order
+                filteredTodos.sort((a, b) => (a.position || 0) - (b.position || 0));
 
                 filteredTodos.forEach(todo => {
                     const li = document.createElement('li');
@@ -886,6 +900,7 @@
                     li.dataset.id = todo.id;
                     li.dataset.projectId = project.id;
                     li.dataset.completed = todo.completed ? '1' : '0';
+                    li.dataset.position = todo.position;
                     let dueDateHtml = '';
                     let recurrenceHtml = '';
                     if (todo.due_date) {
@@ -1070,6 +1085,12 @@
             textarea.style.height = element.scrollHeight + 'px';
             element.replaceWith(textarea);
 
+            // Disable dragging while editing so text can be selected
+            const liContainer = textarea.closest('.todo-item');
+            if (liContainer) {
+                liContainer.setAttribute('draggable', 'false');
+            }
+
             textarea.dataset.id = Number(id);
 
             textarea.focus();
@@ -1087,6 +1108,8 @@
                     pre.textContent = originalText;
                     pre.onclick = () => editTodo(id, pre);
                     textarea.replaceWith(pre);
+                const liDone = pre.closest('.todo-item');
+                if (liDone) liDone.setAttribute('draggable', 'true');
                 }
             });
 
@@ -1097,6 +1120,8 @@
                 pre.textContent = originalText;
                 pre.onclick = () => editTodo(id, pre);
                 textarea.replaceWith(pre);
+                const liDone = pre.closest('.todo-item');
+                if (liDone) liDone.setAttribute('draggable', 'true');
             });
         }
 
@@ -1110,6 +1135,8 @@
                 pre.textContent = originalText;
                 pre.onclick = () => editTodo(id, pre);
                 textarea.replaceWith(pre);
+                const liDone = pre.closest('.todo-item');
+                if (liDone) liDone.setAttribute('draggable', 'true');
                 return;
             }
 
@@ -1132,7 +1159,8 @@
                         completed: completed,
                         due_date: dueInput ? (dueInput.value || null) : null,
                         recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
+                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null,
+                        position: Number(li.dataset.position)
                     })
                 });
 
@@ -1147,6 +1175,8 @@
                 pre.textContent = newTitle;
                 pre.onclick = () => editTodo(id, pre);
                 textarea.replaceWith(pre);
+                const liDone = pre.closest('.todo-item');
+                if (liDone) liDone.setAttribute('draggable', 'true');
             } catch (error) {
                 console.error('Error updating todo:', error);
                 alert('Failed to update todo. Please try again.');
@@ -1156,6 +1186,8 @@
                 pre.textContent = originalText;
                 pre.onclick = () => editTodo(id, pre);
                 textarea.replaceWith(pre);
+                const liDone = pre.closest('.todo-item');
+                if (liDone) liDone.setAttribute('draggable', 'true');
             }
         }
 

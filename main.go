@@ -304,17 +304,24 @@ func addTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine position so the new todo appears at the top of the active list for its project
+	var minPos sql.NullInt64
+	if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if minPos.Valid {
+		todo.Position = int(minPos.Int64) - 1
+	} else {
+		todo.Position = 0
+	}
+
 	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer stmt.Close()
-
-	// Determine next position within project & completed status=false
-	var maxPos int
-	_ = db.QueryRow("SELECT COALESCE(MAX(position),0) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&maxPos)
-	todo.Position = maxPos + 1
 
 	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.Position); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -344,8 +351,43 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Handle recurring logic: if marking completed and recurrence set, complete current and create next occurrence
-	if todo.Completed && todo.CompletedAt == nil {
+	// Fetch previous completion state to detect transition
+	var prevCompleted bool
+	var prevCompletedAt sql.NullTime
+	if err := db.QueryRow("SELECT completed, completed_at FROM todos WHERE id = ?", todo.ID).Scan(&prevCompleted, &prevCompletedAt); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// If transitioning from completed to active (uncomplete), move todo to top of active list
+	if prevCompleted && !todo.Completed {
+		var minPos sql.NullInt64
+		if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		newPos := 0
+		if minPos.Valid {
+			newPos = int(minPos.Int64) - 1
+		}
+		todo.Position = newPos
+	}
+
+	// If transitioning from active to completed
+	if !prevCompleted && todo.Completed {
+		// move todo to top of completed list
+		var minPosCompleted sql.NullInt64
+		if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 1", todo.ProjectID).Scan(&minPosCompleted); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if minPosCompleted.Valid {
+			todo.Position = int(minPosCompleted.Int64) - 1
+		} else {
+			todo.Position = 0
+		}
+
+		// Handle recurring logic
 		if todo.RecurrenceInterval != nil && todo.RecurrenceUnit != nil {
 			tx, err := db.Begin()
 			if err != nil {
@@ -355,7 +397,7 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 			// complete current
 			now := time.Now()
 			todo.CompletedAt = &now
-			_, err = tx.Exec("UPDATE todos SET title=?, completed=1, completed_at=?, due_date=?, recurrence_interval=?, recurrence_unit=? WHERE id=?", todo.Title, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ID)
+			_, err = tx.Exec("UPDATE todos SET title=?, completed=1, completed_at=?, due_date=?, recurrence_interval=?, recurrence_unit=?, position=? WHERE id=?", todo.Title, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.Position, todo.ID)
 			if err != nil {
 				tx.Rollback()
 				http.Error(w, err.Error(), http.StatusInternalServerError)
