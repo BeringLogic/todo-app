@@ -40,6 +40,9 @@ type Project struct {
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+//go:embed index.html
+var indexHTML string
+
 var db *sql.DB
 
 func init() {
@@ -563,8 +566,11 @@ func main() {
 func createRouter() http.Handler {
 	mux := http.NewServeMux()
 
-	// Serve static files
-	mux.Handle("/", http.FileServer(http.Dir(".")))
+	// Serve embedded index.html at root
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, indexHTML)
+	})
 
 	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
