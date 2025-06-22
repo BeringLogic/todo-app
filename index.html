@@ -111,6 +111,160 @@
             background-color: var(--toggle-bg);
         }
 
+        /* Import Progress Modal */
+        .import-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .import-modal.visible {
+            display: flex;
+            opacity: 1;
+        }
+
+        .import-modal-content {
+            background-color: var(--container-bg);
+            border-radius: 8px;
+            width: 600px;
+            max-width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            animation: modalFadeIn 0.3s ease;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .import-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .import-modal-title {
+            margin: 0;
+            font-size: 1.4em;
+            color: var(--text-color);
+        }
+
+        .import-close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--text-color);
+            padding: 5px;
+        }
+
+        .progress-section {
+            margin-bottom: 25px;
+        }
+
+        .progress-section h4 {
+            margin: 0 0 10px 0;
+            color: var(--text-color);
+            font-size: 1.1em;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background-color: var(--input-bg);
+            border-radius: 6px;
+            overflow: hidden;
+            margin-bottom: 5px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s ease, background-color 0.3s ease;
+            border-radius: 6px;
+        }
+
+        .progress-bar.complete {
+            background-color: #4CAF50;
+        }
+
+        .progress-bar.error {
+            background-color: #f44336;
+        }
+
+        .progress-stats {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: var(--text-color);
+            margin-bottom: 15px;
+        }
+
+        .progress-details {
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            background-color: var(--input-bg);
+        }
+
+        .progress-item {
+            padding: 8px 10px;
+            margin: 3px 0;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+        .progress-item:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .progress-item.complete {
+            color: #4CAF50;
+        }
+
+        .progress-item.error {
+            color: #f44336;
+        }
+
+        .progress-item-pending {
+            color: var(--text-color);
+            opacity: 0.7;
+        }
+
+        .progress-item-icon {
+            margin-right: 10px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .progress-item-text {
+            flex-grow: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .theme-toggle {
             position: fixed;
             top: 20px;
@@ -970,55 +1124,262 @@
             
             if (!exportJson) throw new Error('No data to import');
             
-            // Handle Google Tasks API export format
-            const taskLists = exportJson.items || [];
-            if (taskLists.length === 0) {
-                throw new Error('No task lists found in the export');
-            }
+            // Create and show modal
+            const modal = document.createElement('div');
+            modal.className = 'import-modal';
+            modal.innerHTML = `
+                <div class="import-modal-content">
+                    <div class="import-modal-header">
+                        <h3 class="import-modal-title">Importing Google Tasks</h3>
+                        <button class="import-close-btn" disabled>&times;</button>
+                    </div>
+                    
+                    <div class="progress-section">
+                        <h4>Projects</h4>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="project-progress"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span id="project-stats">0/0 projects</span>
+                            <span id="project-status">Starting import...</span>
+                        </div>
+                        <div class="progress-details" id="project-details"></div>
+                    </div>
+                    
+
+                </div>
+            `;
+            document.body.appendChild(modal);
             
-            for (const list of taskLists) {
-                const title = list.title || 'Imported';
-                console.log(`Creating project: ${title}`);
+            // Show modal with animation
+            setTimeout(() => modal.classList.add('visible'), 10);
+            
+            // Helper function to update progress
+            const updateProgress = (current, total, status, isComplete = false, isError = false) => {
+                const progressBar = document.getElementById('project-progress');
+                const statsEl = document.getElementById('project-stats');
+                const statusEl = document.getElementById('project-status');
                 
-                const createResp = await fetch('/api/projects', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title })
-                });
-                
-                if (!createResp.ok) {
-                    const error = await createResp.text();
-                    console.error('Failed to create project:', error);
-                    throw new Error(`Failed to create project: ${error}`);
-                }
-                
-                const project = await createResp.json();
-                const tasks = list.items || [];
-                
-                console.log(`Importing ${tasks.length} tasks for project ${title}`);
-                
-                for (const task of tasks) {
-                    if (!task.title) continue; // Skip tasks without a title
+                if (progressBar) {
+                    const progress = total > 0 ? Math.round((current / total) * 100) : 0;
+                    progressBar.style.width = `${progress}%`;
                     
-                    const todo = {
-                        title: task.title || '',
-                        completed: task.status === 'completed' || !!task.completed,
-                        project_id: project.id,
-                        due_date: task.due ? new Date(task.due).toISOString().split('T')[0] : null
-                    };
-                    
-                    console.log('Importing task:', todo.title, 'due:', todo.due_date);
-                    
-                    const taskResp = await fetch('/api/todo', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(todo)
-                    });
-                    
-                    if (!taskResp.ok) {
-                        console.error('Failed to import task:', await taskResp.text());
+                    if (isComplete) {
+                        progressBar.classList.add('complete');
+                        statusEl.textContent = 'Completed';
+                    } else if (isError) {
+                        progressBar.classList.add('error');
                     }
                 }
+                
+                if (statsEl) {
+                    statsEl.textContent = `${current}/${total} project${total !== 1 ? 's' : ''}`;
+                }
+                
+                if (statusEl && status) {
+                    statusEl.textContent = status;
+                }
+            };
+            
+            // Helper function to log errors
+            const logError = (error) => {
+                console.error(error);
+                const detailsEl = document.getElementById('project-details');
+                if (!detailsEl) return;
+                
+                const entry = document.createElement('div');
+                entry.className = 'progress-item error';
+                entry.innerHTML = `
+                    <span class="progress-item-icon">✗</span>
+                    <span class="progress-item-text">${error}</span>
+                `;
+                detailsEl.appendChild(entry);
+                detailsEl.scrollTop = detailsEl.scrollHeight;
+            };
+            
+            try {
+                // Handle Google Tasks API export format
+                const taskLists = exportJson.items || [];
+                if (taskLists.length === 0) {
+                    throw new Error('No task lists found in the export');
+                }
+                
+                let totalTasks = 0;
+                let importedTasks = 0;
+                let importedProjects = 0;
+                
+                // First count all tasks and create project entries
+                for (const list of taskLists) {
+                    const tasks = (list.items || []).filter(t => t.title);
+                    totalTasks += tasks.length;
+                    
+                    if (tasks.length > 0) {
+                        const projectEntry = document.createElement('div');
+                        projectEntry.className = 'progress-item progress-item-pending';
+                        projectEntry.innerHTML = `
+                            <span class="progress-item-icon">⏳</span>
+                            <span class="progress-item-text">${list.title || 'Untitled Project'}</span>
+                            <span class="progress-item-stats">0/${tasks.length} tasks</span>
+                        `;
+                        document.getElementById('project-details').appendChild(projectEntry);
+                    }
+                }
+                
+                if (totalTasks === 0) {
+                    throw new Error('No tasks found in the export');
+                }
+                
+                // Update project progress
+                updateProgress(0, taskLists.length, 'Starting project import...');
+                
+                // Process each project
+                for (let i = 0; i < taskLists.length; i++) {
+                    const list = taskLists[i];
+                    const title = list.title || 'Untitled Project';
+                    const tasks = (list.items || []).filter(t => t.title);
+                    
+                    if (tasks.length === 0) continue;
+                    
+                    // Update project status
+                    const projectEntries = document.querySelectorAll('#project-details .progress-item');
+                    const currentProjectEl = projectEntries[importedProjects];
+                    
+                    if (currentProjectEl) {
+                        currentProjectEl.innerHTML = `
+                            <span class="progress-item-icon">🔄</span>
+                            <span class="progress-item-text">${title}</span>
+                            <span class="progress-item-stats">0/${tasks.length} tasks</span>
+                        `;
+                    }
+                    currentProjectEl.scrollIntoView({ behavior: 'smooth' });
+                    
+                    updateProgress(importedProjects, taskLists.length, `Importing project: ${title}...`);
+                    
+                    try {
+                        // Create project
+                        const createResp = await fetch('/api/projects', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title })
+                        });
+                        
+                        if (!createResp.ok) {
+                            throw new Error(`Failed to create project: ${await createResp.text()}`);
+                        }
+                        
+                        const project = await createResp.json();
+                        
+                        // Update project entry
+                        if (currentProjectEl) {
+                            currentProjectEl.innerHTML = `
+                                <span class="progress-item-icon">✓</span>
+                                <span class="progress-item-text">${title}</span>
+                                <span class="progress-item-stats">0/${tasks.length} tasks</span>
+                            `;
+                        }
+                        
+                        // Process tasks for this project
+                        for (let j = 0; j < tasks.length; j++) {
+                            const task = tasks[j];
+                            
+                            try {
+                                const todo = {
+                                    title: task.title || '',
+                                    completed: task.status === 'completed' || !!task.completed,
+                                    project_id: project.id,
+                                    due_date: task.due ? new Date(task.due).toISOString().split('T')[0] : null
+                                };
+                                
+                                const taskResp = await fetch('/api/todo', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(todo)
+                                });
+                                
+                                if (!taskResp.ok) {
+                                    throw new Error(`Failed to import task: ${await taskResp.text()}`);
+                                }
+                                
+                                importedTasks++;
+                                
+                                // Update project task count in the UI
+                                if (currentProjectEl) {
+                                    const taskCount = currentProjectEl.querySelector('.progress-item-stats');
+                                    if (taskCount) {
+                                        taskCount.textContent = `(${j + 1}/${tasks.length} tasks)`;
+                                    }
+                                    
+                                    // Update the main status with current progress
+                                    updateProgress(
+                                        importedProjects, 
+                                        taskLists.length, 
+                                        `Importing ${title} (${j + 1}/${tasks.length} tasks)...`
+                                    );
+                                }
+                            } catch (taskError) {
+                                logError(`Error importing task: ${task.title} - ${taskError.message}`);
+                            }
+                        }
+                        
+                        importedProjects++;
+                        updateProgress(importedProjects, taskLists.length, 'Project import in progress...');
+                        
+                    } catch (projectError) {
+                        console.error(`Error importing project ${title}:`, projectError);
+                        
+                        if (currentProjectEl) {
+                            currentProjectEl.innerHTML = `
+                                <span class="progress-item-icon">✗</span>
+                                <span class="progress-item-text">${title} - ${projectError.message}</span>
+                            `;
+                            currentProjectEl.classList.add('error');
+                        }
+                        
+                        // Skip to next project
+                        importedProjects++;
+                        continue;
+                    }
+                }
+                
+                // Update final status
+                updateProgress(importedProjects, taskLists.length, 'All projects imported', true);
+                
+                // Enable close button
+                const closeBtn = modal.querySelector('.import-close-btn');
+                if (closeBtn) {
+                    closeBtn.disabled = false;
+                    closeBtn.onclick = () => {
+                        modal.classList.remove('visible');
+                        setTimeout(() => {
+                            document.body.removeChild(modal);
+                            loadTodosByProject(); // Refresh the UI
+                        }, 300);
+                    };
+                }
+                
+            } catch (error) {
+                console.error('Import failed:', error);
+                
+                // Update UI with error
+                const statusEl = document.getElementById('project-status');
+                if (statusEl) {
+                    statusEl.textContent = `Error: ${error.message}`;
+                    statusEl.style.color = '#f44336';
+                }
+                
+                // Enable close button on error
+                const closeBtn = modal.querySelector('.import-close-btn');
+                if (closeBtn) {
+                    closeBtn.disabled = false;
+                    closeBtn.onclick = () => {
+                        modal.classList.remove('visible');
+                        setTimeout(() => {
+                            document.body.removeChild(modal);
+                        }, 300);
+                    };
+                }
+                
+                throw error; // Re-throw to be caught by the caller
             }
         }
 
