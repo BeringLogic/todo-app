@@ -438,8 +438,20 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 				}
 				nextDue = t.Format("2006-01-02")
 			}
-			// insert new row
-			_, err = tx.Exec("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit) VALUES (?,?,?,?,?,?)", todo.Title, 0, todo.ProjectID, sql.NullString{String: nextDue, Valid: nextDue != ""}, todo.RecurrenceInterval, todo.RecurrenceUnit)
+			// Get the minimum position for active todos to place the new one at the top
+			var minPos sql.NullInt64
+			if err := tx.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			newPos := 0
+			if minPos.Valid {
+				newPos = int(minPos.Int64) - 1
+			}
+
+			// insert new row at the top of the list
+			_, err = tx.Exec("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?,?,?,?,?,?,?)", todo.Title, 0, todo.ProjectID, sql.NullString{String: nextDue, Valid: nextDue != ""}, todo.RecurrenceInterval, todo.RecurrenceUnit, newPos)
 			if err != nil {
 				tx.Rollback()
 				http.Error(w, err.Error(), http.StatusInternalServerError)
