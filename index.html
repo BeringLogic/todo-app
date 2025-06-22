@@ -82,50 +82,33 @@
             padding: 8px;
         }
 
-        .menu-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
-            z-index: 99;
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .menu-overlay.active {
-            display: flex;
-        }
-
-        .menu-content {
+        .dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 10px;
             background-color: var(--container-bg);
-            padding: 20px;
-            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
             box-shadow: var(--container-shadow);
-            width: 90%;
-            max-width: 300px;
+            z-index: 100;
+            display: none;
+            min-width: 200px;
         }
 
-        .menu-item {
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 10px;
+        .dropdown-menu.active {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 8px 12px;
             cursor: pointer;
-            transition: all 0.2s;
             display: flex;
             align-items: center;
             gap: 8px;
         }
 
-        .menu-item:hover {
+        .dropdown-item:hover {
             background-color: var(--toggle-bg);
-        }
-
-        .menu-item svg {
-            width: 18px;
-            height: 18px;
         }
 
         .theme-toggle {
@@ -437,16 +420,18 @@
 <body>
     <div class="hamburger-menu">
         <button id="menuToggle">☰</button>
-    </div>
-
-    <div class="menu-overlay" id="menuOverlay">
-        <div class="menu-content">
-            <div class="menu-item" onclick="addProject()">
+        <div class="dropdown-menu" id="dropdownMenu">
+            <div class="dropdown-item" onclick="addProject()">
                 <span>+</span>
                 <span>New Project</span>
             </div>
+            <div class="dropdown-item" onclick="document.getElementById('importFile').click()">
+                <span>⇪</span>
+                <span>Import Google Tasks</span>
+            </div>
         </div>
     </div>
+    <input type="file" id="importFile" accept="application/json" style="display:none" />
 
     <div class="theme-toggle">
         <button id="darkModeToggle">
@@ -463,7 +448,7 @@
          */
         async function loadUpcomingTodos(todos) {
             // Reuse full-featured loadProject to ensure consistent functionality
-            const pseudoProject = { id: 'nextweek', title: 'Next Week' };
+            const pseudoProject = { id: 'thisweek', title: 'This Week' };
             const group = await loadProject(pseudoProject, todos);
 
             // Make title read-only (remove click handlers and pointer events)
@@ -575,6 +560,9 @@
             }
 
             try {
+                // Remove the expanded state from localStorage first
+                localStorage.removeItem('completedExpanded_' + id);
+                
                 const response = await fetch(`/api/projects/${id}`, {
                     method: 'DELETE'
                 });
@@ -588,8 +576,6 @@
                 console.error('Error deleting project:', error);
                 alert('Failed to delete project. Please try again.');
             }
-
-            localStorage.removeItem('completedExpanded_' + id);
         }
 
         // Add click handler for delete buttons
@@ -601,7 +587,31 @@
             }
         });
 
-        // Menu toggle
+        // Menu toggle and dropdown handlers will be initialized after DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Toggle dropdown menu
+            document.addEventListener('click', function(e) {
+                const menuButton = document.getElementById('menuToggle');
+                const dropdownMenu = document.getElementById('dropdownMenu');
+                
+                if (e.target === menuButton || (menuButton && menuButton.contains(e.target))) {
+                    dropdownMenu.classList.toggle('active');
+                } else if (dropdownMenu && !dropdownMenu.contains(e.target)) {
+                    dropdownMenu.classList.remove('active');
+                }
+            });
+
+            // Close menu when clicking on a menu item
+            document.querySelectorAll('.dropdown-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const dropdownMenu = document.getElementById('dropdownMenu');
+                    if (dropdownMenu) {
+                        dropdownMenu.classList.remove('active');
+                    }
+                });
+            });
+        });
+
         // Todo menu handlers
         document.addEventListener('click', async function(e) {
             const menuBtn = e.target.closest('.todo-menu-btn');
@@ -679,12 +689,6 @@
             document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
         });
 
-        // Menu toggle
-        document.getElementById('menuToggle').addEventListener('click', function() {
-            const overlay = document.getElementById('menuOverlay');
-            overlay.classList.toggle('active');
-        });
-
         // When due date input cleared, blank out recurrence inputs (UI only)
         document.addEventListener('change', function(e){
             const input = e.target;
@@ -722,7 +726,12 @@
                 return; // handled project drag
             }
             const item = e.target.closest('.todo-item');
-            if(item){
+            if(item) {
+                // Prevent dragging todos from the "This Week" project
+                if (item.dataset.projectId === 'thisweek') {
+                    e.preventDefault();
+                    return;
+                }
                 e.dataTransfer.setData('application/json', JSON.stringify({
                     id: item.dataset.id,
                     fromProject: item.dataset.projectId,
@@ -745,6 +754,23 @@
         });
         document.addEventListener('dragover', function(e){
             if (e.target.closest('textarea')) return; // allow default drag over textarea
+            
+            // Check if we're over a todo from "This Week" project
+            const todoItem = e.target.closest('.todo-item');
+            if (todoItem && todoItem.dataset.projectId === 'thisweek') {
+                return; // Don't allow dropping on todos from "This Week" project
+            }
+            
+            // Check if we're over the "This Week" project
+            const projectItem = e.target.closest('.project-item');
+            if (projectItem) {
+                const projectTitle = projectItem.querySelector('.project-title');
+                if (projectTitle && projectTitle.dataset.id === 'thisweek') {
+                    return; // Don't allow dropping on the "This Week" project
+                }
+            }
+            
+            // Allow dropping on other lists and items
             if(e.target.closest('.todo-list') || e.target.closest('.todo-item') || e.target.closest('.project-item')){
                 e.preventDefault();
             }
@@ -764,6 +790,15 @@
 
                 const draggedEl = projectsContainer.querySelector(`.project-title[data-id="${payload.projectId}"]`)?.closest('.project-item');
                 if (!draggedEl || draggedEl === targetProjectItem) return;
+
+                // Prevent dropping to the left of the "This Week" project
+                const thisWeekProject = projectsContainer.querySelector('.project-title[data-id="thisweek"]');
+                if (thisWeekProject) {
+                    const thisWeekRect = thisWeekProject.getBoundingClientRect();
+                    if (e.clientX <= thisWeekRect.right) {
+                        return; // Don't allow dropping to the left of "This Week"
+                    }
+                }
 
                 const rect = targetProjectItem.getBoundingClientRect();
                 if (e.clientX > rect.left + rect.width / 2) {
@@ -799,6 +834,12 @@
             if(!dataStr) return;
             let data;
             try{ data = JSON.parse(dataStr);}catch(err){ return; }
+            
+            // Prevent moving todos from the "This Week" project
+            if (data.fromProject === 'thisweek') {
+                return;
+            }
+            
             const todoId = Number(data.id);
             const targetProject = Number(list.dataset.projectId);
             const targetCompleted = list.dataset.completed === '1';
@@ -806,32 +847,39 @@
             if(Number.isNaN(todoId) || Number.isNaN(targetProject)) return;
             try{
                 // gather current todo details so we don't lose them when moving
-            const itemEl = document.querySelector(`.todo-item[data-id="${todoId}"]`);
-            const titleEl = itemEl ? itemEl.querySelector('.todo-text') : null;
-            const title = titleEl ? titleEl.textContent : '';
-            const dateInput = itemEl ? itemEl.querySelector('.todo-date-input') : null;
-            let dueDate = null;
-            if (dateInput) {
-                dueDate = dateInput.value || (dateInput.dataset.due ? dateInput.dataset.due.split('T')[0] : null) || null;
-            }
-            const countEl = itemEl ? itemEl.querySelector('.recurrence-count') : null;
-            const unitEl = itemEl ? itemEl.querySelector('.recurrence-unit') : null;
-            const recInt = countEl && countEl.value ? Number(countEl.value) : null;
-            const recUnitVal = unitEl && unitEl.value ? unitEl.value : null;
+                // Only move the todo in the destination list (not in special lists)
+                let itemEl = null;
+                itemEl = Array.from(document.querySelectorAll('.todo-item')).find(el => el.dataset.projectId === data.fromProject && Number(el.dataset.id) === todoId);
 
-            const response = await fetch('/api/todo', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: todoId,
-                    title: title,
-                    completed: targetCompleted,
-                    project_id: targetProject,
-                    due_date: dueDate,
-                    recurrence_interval: recInt,
-                    recurrence_unit: recUnitVal
-                })
-            });
+                // Fallback for legacy cases
+                if (!itemEl) {
+                    itemEl = document.querySelector(`.todo-item[data-id="${todoId}"]`);
+                }
+                const titleEl = itemEl ? itemEl.querySelector('.todo-text') : null;
+                const title = titleEl ? titleEl.textContent : '';
+                const dateInput = itemEl ? itemEl.querySelector('.todo-date-input') : null;
+                let dueDate = null;
+                if (dateInput) {
+                    dueDate = dateInput.value || (dateInput.dataset.due ? dateInput.dataset.due.split('T')[0] : null) || null;
+                }
+                const countEl = itemEl ? itemEl.querySelector('.recurrence-count') : null;
+                const unitEl = itemEl ? itemEl.querySelector('.recurrence-unit') : null;
+                const recInt = countEl && countEl.value ? Number(countEl.value) : null;
+                const recUnitVal = unitEl && unitEl.value ? unitEl.value : null;
+
+                const response = await fetch('/api/todo', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: todoId,
+                        title: title,
+                        completed: targetCompleted,
+                        project_id: targetProject,
+                        due_date: dueDate,
+                        recurrence_interval: recInt,
+                        recurrence_unit: recUnitVal
+                    })
+                });
                 if(!response.ok){ throw new Error('Failed to move todo'); }
                 const draggedEl = itemEl;
                 if(draggedEl){
@@ -878,13 +926,6 @@
             }
         });
 
-        // Close menu when clicking outside
-        document.getElementById('menuOverlay').addEventListener('click', function(e) {
-            if (e.target === this) {
-                this.classList.remove('active');
-            }
-        });
-
         async function addProject() {
             try {
                 const response = await fetch('/api/projects', {
@@ -902,20 +943,101 @@
                 // Get the created project
                 const project = await response.json();
                 
-                // Close the menu
-                document.getElementById('menuOverlay').classList.remove('active');
+                // Close the dropdown menu
+                const dropdownMenu = document.getElementById('dropdownMenu');
+                if (dropdownMenu) {
+                    dropdownMenu.classList.remove('active');
+                }
                 
                 // Load todos with the new project
                 await loadTodosByProject();
+
+                // Scroll the new project into view
+                setTimeout(() => {
+                    const projectEl = document.querySelector(`.project-title[data-id="${project.id}"]`);
+                    if (projectEl) {
+                        projectEl.closest('.project-item')?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                    }
+                }, 50);
             } catch (error) {
                 console.error('Error adding project:', error);
                 alert('Failed to add project. Please try again.');
             }
         }
 
+        async function importGoogleTasks(exportJson) {
+            console.log('Importing data:', JSON.stringify(exportJson, null, 2).substring(0, 1000) + '...');
+            
+            if (!exportJson) throw new Error('No data to import');
+            
+            // Handle Google Tasks API export format
+            const taskLists = exportJson.items || [];
+            if (taskLists.length === 0) {
+                throw new Error('No task lists found in the export');
+            }
+            
+            for (const list of taskLists) {
+                const title = list.title || 'Imported';
+                console.log(`Creating project: ${title}`);
+                
+                const createResp = await fetch('/api/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title })
+                });
+                
+                if (!createResp.ok) {
+                    const error = await createResp.text();
+                    console.error('Failed to create project:', error);
+                    throw new Error(`Failed to create project: ${error}`);
+                }
+                
+                const project = await createResp.json();
+                const tasks = list.items || [];
+                
+                console.log(`Importing ${tasks.length} tasks for project ${title}`);
+                
+                for (const task of tasks) {
+                    if (!task.title) continue; // Skip tasks without a title
+                    
+                    const todo = {
+                        title: task.title || '',
+                        completed: task.status === 'completed' || !!task.completed,
+                        project_id: project.id,
+                        due_date: task.due ? new Date(task.due).toISOString().split('T')[0] : null
+                    };
+                    
+                    console.log('Importing task:', todo.title, 'due:', todo.due_date);
+                    
+                    const taskResp = await fetch('/api/todo', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(todo)
+                    });
+                    
+                    if (!taskResp.ok) {
+                        console.error('Failed to import task:', await taskResp.text());
+                    }
+                }
+            }
+        }
+
         async function loadTodosByProject() {
             try {
-                // Fetch all todos once
+                // Fetch all projects first
+                const projectsResp = await fetch('/api/projects');
+                if (!projectsResp.ok) {
+                    throw new Error('Failed to fetch projects');
+                }
+                const projectsList = await projectsResp.json();
+                
+                // If no projects, clear the UI and return early
+                if (!projectsList || projectsList.length === 0) {
+                    document.querySelector('.projects-container').innerHTML = '<p>No projects yet. Create one to get started!</p>';
+                    return;
+                }
+                
+                // Fetch all todos
                 const todosResponse = await fetch('/api/todos');
                 if (!todosResponse.ok) {
                     throw new Error('Failed to fetch todos');
@@ -929,14 +1051,14 @@
                 const projectsContainer = document.querySelector('.projects-container');
                 projectsContainer.innerHTML = '';
 
-                // Add special "Next Week" project section for upcoming todos
+                // Add special "This Week" project section for upcoming todos
                 const today = new Date();
-                const nextWeek = new Date();
-                nextWeek.setDate(today.getDate() + 6);
+                const thisWeek = new Date();
+                thisWeek.setDate(today.getDate() + 6);
                 const upcomingTodos = todos.filter(todo => {
                     if (!todo.due_date) return false;
                     const due = new Date(todo.due_date);
-                    return due <= nextWeek;
+                    return due <= thisWeek;
                 });
 
                 // Sort by due_date in ascending order
@@ -974,7 +1096,7 @@
                 projectGroup.className = 'project-item';
                 projectGroup.innerHTML = `
                     <div class="project-title-container">
-                        <div class="project-title" data-id="${project.id}" ${project.id!=='nextweek' ? 'draggable="true"' : ''}>${project.title}</div>
+                        <div class="project-title" data-id="${project.id}" ${project.id!=='thisweek' ? 'draggable="true"' : ''}>${project.title}</div>
                         <div class="active-count-badge"></div>
                         <button class="delete-project-btn" data-id="${project.id}">✕</button>
                     </div>
@@ -1046,7 +1168,7 @@
                                 </div>
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
                                     <span>Repeat</span>
-                                    <input type="number" min="1" class="recurrence-count" data-id="${todo.id}" value="${todo.recurrence_interval || ''}" style="width:60px;">
+                                    <input type="number" min="0" class="recurrence-count" data-id="${todo.id}" value="${todo.recurrence_interval || ''}" style="width:60px;">
                                     <select class="recurrence-unit" data-id="${todo.id}">
                                         <option value="day" ${todo.recurrence_unit==='day' ? 'selected':''}>day(s)</option>
                                         <option value="week" ${todo.recurrence_unit==='week' ? 'selected':''}>week(s)</option>
@@ -1137,6 +1259,26 @@
                 alert('Failed to load todos. Please try again.');
             }
         }
+
+        // Import file handler
+        document.getElementById('importFile').addEventListener('change', async function(e){
+            const file = e.target.files[0];
+            if(!file) return;
+            try{
+                const text = await file.text();
+                console.log('Raw JSON:', text.substring(0, 500) + '...'); // Log first 500 chars
+                const data = JSON.parse(text);
+                console.log('Parsed JSON structure:', JSON.stringify(data, null, 2).substring(0, 1000) + '...');
+                await importGoogleTasks(data);
+                alert('Import completed');
+                await loadTodosByProject();
+            }catch(err){
+                console.error('Import error:', err, 'Stack:', err.stack);
+                alert('Import failed: ' + (err.message || 'Unknown error'));
+            }finally{
+                e.target.value = '';
+            }
+        });
 
         // Load todos when page loads
         document.addEventListener('DOMContentLoaded', async function() {
@@ -1264,6 +1406,10 @@
                 const checkbox = li ? li.querySelector('.todo-checkbox') : null;
                 const completed = checkbox ? checkbox.checked : false;
                 const dueInput = li ? li.querySelector('.todo-date-input') : null;
+                let dueDate = null;
+                if (dueInput) {
+                    dueDate = dueInput.value || (dueInput.dataset.due ? dueInput.dataset.due.split('T')[0] : null) || null;
+                }
                 const countEl = li ? li.querySelector('.recurrence-count') : null;
                 const unitEl = li ? li.querySelector('.recurrence-unit') : null;
                 
@@ -1276,7 +1422,7 @@
                         id: Number(id),
                         title: newTitle,
                         completed: completed,
-                        due_date: dueInput ? (dueInput.value || null) : null,
+                        due_date: dueDate,
                         recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
                         recurrence_unit: unitEl && unitEl.value ? unitEl.value : null,
                         position: Number(li.dataset.position)

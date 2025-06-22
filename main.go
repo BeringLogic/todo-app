@@ -47,7 +47,7 @@ var db *sql.DB
 
 func init() {
 	var err error
-	db, err = sql.Open("sqlite3", "./todos.db")
+	db, err = sql.Open("sqlite3", "./data/todos.db")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -141,9 +141,9 @@ func addProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get the highest position
+	// Get the highest position, defaulting to 0 if no projects exist
 	var maxPosition int
-	err := db.QueryRow("SELECT MAX(position) FROM projects").Scan(&maxPosition)
+	err := db.QueryRow("SELECT COALESCE(MAX(position), 0) FROM projects").Scan(&maxPosition)
 	if err != nil && err != sql.ErrNoRows {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -296,7 +296,7 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var todos []Todo
+	todos := make([]Todo, 0)
 	for rows.Next() {
 		var todo Todo
 		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.RecurrenceInterval, &todo.RecurrenceUnit, &todo.ProjectID, &todo.Position); err != nil {
