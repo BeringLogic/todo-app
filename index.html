@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Todo List</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <style>
         /* Catppuccin Latte (light) theme */
         :root {
@@ -353,13 +354,18 @@
             margin-bottom: 2px;
         }
         .todo-input {
-            width: 204px;
+            width: 192px;
+            min-height: 1.5em;  /* Minimum height for 1 line */
+            line-height: 1.5em; /* Match line height to min-height */
+            padding: 4px 8px;   /* Add some padding for better appearance */
             border-radius: 4px;
             background-color: var(--input-bg);
             color: var(--input-text);
             border: 1px solid var(--border-color);
             font-family: inherit;
             font-size: inherit;
+            resize: none;       /* Prevent manual resizing */
+            overflow: hidden;    /* Hide scrollbar when auto-resizing */
         }
 
         .todo-list {
@@ -1569,13 +1575,23 @@
                     }
                 });
 
-                // Add Enter key handler
-                projectGroup.querySelector('.todo-input').addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
+                const todoInput = projectGroup.querySelector('.todo-input');
+                
+                // Add key handlers for todo input
+                todoInput.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') {
+                        // Clear the input on Escape
+                        this.value = '';
+                        autoResizeTextarea(this);
+                    } else if (e.key === 'Enter' && !e.shiftKey) {
+                        // Submit on Enter (without Shift)
                         e.preventDefault();
-                        addTodo(e.target);
+                        addTodo(this);
                     }
                 });
+                
+                // Setup auto-resize for the todo input
+                setupAutoResize(todoInput);
 
                 activeTodos.querySelectorAll('.todo-text').forEach(list => {
                     list.addEventListener('click', function(e) {
@@ -1640,6 +1656,23 @@
                 e.target.value = '';
             }
         });
+
+        // Auto-resize textarea function
+        function autoResizeTextarea(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = (textarea.scrollHeight) + 'px';
+        }
+
+        // Add auto-resize event listener to a textarea
+        function setupAutoResize(textarea) {
+            // Initial resize
+            autoResizeTextarea(textarea);
+            
+            // Resize on input
+            textarea.addEventListener('input', function() {
+                autoResizeTextarea(this);
+            });
+        }
 
         // Load todos when page loads
         document.addEventListener('DOMContentLoaded', async function() {
