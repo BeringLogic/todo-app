@@ -28,10 +28,10 @@ FROM alpine:latest AS runner
 # Install runtime dependencies for the compiled binary (libsqlite3 & CA certs)
 RUN apk add --no-cache ca-certificates sqlite-libs
 
-WORKDIR /app
+WORKDIR /
 
 # Copy compiled binary and application assets
-COPY --from=builder /app/todo-app ./
+COPY --from=builder /app/todo-app ./app/todo-app
 
 # Create data directory
 RUN mkdir /data
@@ -46,4 +46,4 @@ ENV PORT=8081
 # Run as non-root for security where possible
 USER nobody
 
-ENTRYPOINT ["./todo-app"]
+ENTRYPOINT ["./app/todo-app"]
