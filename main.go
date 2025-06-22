@@ -356,12 +356,23 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Get the current todo to preserve position and project ID if not provided
+	var currentTodo Todo
+	err := db.QueryRow("SELECT position, project_id FROM todos WHERE id = ?", todo.ID).
+		Scan(&currentTodo.Position, &currentTodo.ProjectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Preserve the existing position if not set in the update
+	if todo.Position == 0 {
+		todo.Position = currentTodo.Position
+	}
+
 	// Ensure ProjectID is set (needed for recurring insertion)
 	if todo.ProjectID == 0 {
-		if err := db.QueryRow("SELECT project_id FROM todos WHERE id = ?", todo.ID).Scan(&todo.ProjectID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+		todo.ProjectID = currentTodo.ProjectID
 	}
 
 	// Fetch previous completion state to detect transition
