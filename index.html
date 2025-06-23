@@ -589,9 +589,18 @@
                 <span>⇪</span>
                 <span>Import Google Tasks</span>
             </div>
+            <div class="dropdown-item" id="exportDatabase">
+                <span>⤓</span>
+                <span>Export Database</span>
+            </div>
+            <div class="dropdown-item" id="importDatabase">
+                <span>↑</span>
+                <span>Import Database</span>
+            </div>
         </div>
     </div>
     <input type="file" id="importFile" accept="application/json" style="display:none" />
+    <input type="file" id="importDbFile" accept=".json" style="display:none" />
 
     <div class="theme-toggle">
         <button id="darkModeToggle">
@@ -1637,7 +1646,159 @@
             }
         }
 
-        // Import file handler
+        // Export database handler
+        document.getElementById('exportDatabase').addEventListener('click', async function() {
+            try {
+                // Get all projects and todos in parallel
+                const [todosRes, projectsRes] = await Promise.all([
+                    fetch('/api/todos'),
+                    fetch('/api/projects')
+                ]);
+                
+                if (!todosRes.ok) throw new Error('Failed to fetch todos');
+                if (!projectsRes.ok) throw new Error('Failed to fetch projects');
+                
+                let todos = await todosRes.json();
+                let projects = await projectsRes.json();
+                
+                // Filter out the special 'thisweek' project and its todos
+                projects = projects.filter(p => p.id !== 'thisweek');
+                const projectIds = new Set(projects.map(p => p.id));
+                todos = todos.filter(todo => projectIds.has(todo.project_id));
+                
+                // Combine data
+                const exportData = {
+                    version: 1,
+                    exportedAt: new Date().toISOString(),
+                    projects: projects,
+                    todos: todos
+                };
+                
+                // Create a blob and download link
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `todo-export-${new Date().toISOString()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Failed to export database. Check console for details.');
+            }
+        });
+
+        // Import database handler
+        document.getElementById('importDatabase').addEventListener('click', function() {
+            document.getElementById('importDbFile').click();
+        });
+
+        // Handle database import file selection
+        document.getElementById('importDbFile').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const data = JSON.parse(await file.text());
+                
+                // Validate the import data
+                if (!data.version || !data.projects || !data.todos) {
+                    throw new Error('Invalid import file format');
+                }
+
+                // Confirm with user before proceeding with import
+                if (!confirm(`WARNING: This will DELETE ALL existing projects and todos, then import ${data.projects.length} projects and ${data.todos.length} todos. This action cannot be undone. Continue?`)) {
+                    return;
+                }
+
+                // Delete all existing todos and projects
+                try {
+                    const projects = await fetch('/api/projects').then(res => res.ok ? res.json() : []);
+                    for (const project of projects) {
+                        await fetch(`/api/projects/${project.id}`, { 
+                            method: 'DELETE' 
+                        });
+                    }
+                } catch (err) {
+                    console.error('Failed to clear existing data:', err);
+                    throw new Error('Failed to clear existing data');
+                }
+
+                // Import projects first (excluding any special projects)
+                const projectsToImport = data.projects.filter(p => p.id !== 'thisweek');
+                
+                for (const project of projectsToImport) {
+                    try {
+                        // Create new project with only the necessary fields
+                        const projectData = {
+                            title: project.title,
+                            position: project.position || 0
+                        };
+                        
+                        await fetch('/api/projects', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(projectData)
+                        });
+                    } catch (err) {
+                        console.error(`Failed to import project ${project.id}:`, err);
+                    }
+                }
+                
+                // Get the newly created projects to map old IDs to new ones
+                const newProjects = await fetch('/api/projects').then(res => res.ok ? res.json() : []);
+                const projectIdMap = {};
+                
+                // Create a mapping from old project IDs to new ones
+                for (const oldProject of projectsToImport) {
+                    const newProject = newProjects.find(p => p.title === oldProject.title && p.position === (oldProject.position || 0));
+                    if (newProject) {
+                        projectIdMap[oldProject.id] = newProject.id;
+                    }
+                }
+
+                // Then import todos (only those that belong to imported projects)
+                const todosToImport = data.todos.filter(todo => projectIdMap[todo.project_id] !== undefined);
+                
+                for (const todo of todosToImport) {
+                    try {
+                        // Prepare todo data with all required fields
+                        const todoData = {
+                            title: todo.title || '',
+                            completed: !!todo.completed,
+                            project_id: projectIdMap[todo.project_id] || 1, // Use the mapped project ID
+                            due_date: todo.due_date || null,
+                            recurrence_interval: todo.recurrence_interval || null,
+                            recurrence_unit: todo.recurrence_unit || null,
+                            position: todo.position || 0
+                        };
+                        
+                        // Create new todo
+                        await fetch('/api/todo', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(todoData)
+                        });
+                    } catch (err) {
+                        console.error(`Failed to import todo ${todo.id}:`, err);
+                    }
+                }
+
+                alert('Import completed successfully! Refreshing the page...');
+                window.location.reload();
+
+            } catch (error) {
+                console.error('Import failed:', error);
+                alert('Failed to import database. Check console for details.');
+            } finally {
+                // Reset the file input
+                e.target.value = '';
+            }
+        });
+
+        // Import Google Tasks handler
         document.getElementById('importFile').addEventListener('change', async function(e){
             const file = e.target.files[0];
             if(!file) return;
