@@ -43,6 +43,9 @@ var migrationsFS embed.FS
 //go:embed index.html
 var indexHTML string
 
+//go:embed favicon.svg
+var faviconSVG []byte
+
 var db *sql.DB
 
 func init() {
@@ -589,10 +592,21 @@ func main() {
 func createRouter() http.Handler {
 	mux := http.NewServeMux()
 
+	// Serve favicon.svg
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Write(faviconSVG)
+	})
+
 	// Serve embedded index.html at root
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, indexHTML)
+		// Only serve index.html for root path or non-file paths
+		if r.URL.Path == "/" || r.URL.Path == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, indexHTML)
+		} else {
+			http.NotFound(w, r)
+		}
 	})
 
 	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
