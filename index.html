@@ -293,15 +293,15 @@
         .projects-container {
             display: flex;
             gap: 0;
-            padding: 20px;
+            margin: 20px;
             overflow-x: auto;
             position: fixed;
+            top: 64px;
             bottom: 0;
             left: 0;
             right: 0;
-            height: calc(100vh - 64px);
         }
-
+        
         .project-item {
             width: 210px;
             min-width: 210px;
@@ -453,29 +453,14 @@
             font-family: inherit;
         }
 
-        .due-date {
-            font-size: 0.8em;
-            margin: 2px 0 0 0;
+        .due-date, .recurrence-info {
+            color: var(--blue-color);
         }
-
-        .due-date.today {
-            background-color: var(--yellow-color);
-            color: var(--toggle-bg);
-            padding: 4px 2px 0 2px;
-            border-radius: 4px;
+        .today {
+            color: var(--yellow-color);
         }
-        .due-date.overdue {
-            background-color: var(--red-color);
-            color: var(--toggle-bg);
-            padding: 4px 2px 0 2px;
-            border-radius: 4px;
-        }
-
-        .recurrence-info {
-            font-size: 0.8em;
-            display: inline-flex;
-            margin-left: 6px;
-            color: var(--text-color);
+        .overdue {
+            color: var(--red-color);
         }
 
         .todo-menu-btn {
@@ -487,10 +472,6 @@
             color: var(--text-color);
             cursor: pointer;
             margin-left: auto;
-            opacity: 0;
-        }
-        .todo-item:hover .todo-menu-btn {
-            opacity: 1;
         }
         .todo-menu {
             display: none;
@@ -518,13 +499,17 @@
            color: var(--primary-color); 
            font-weight: bold;
         }
+        .todo-menu-item[data-action="delete"] {
+            color: var(--red-color);
+            font-weight: bold;
+        }
         .todo-menu-item[data-action="save"],
         .todo-menu-item[data-action="cancel"],
         .todo-menu-item[data-action="delete"] {
             text-align: right;
         }
 
-        .todo-date-input {
+        .todo-date-input, .todo-time-input {
             flex: 1;
             padding: 4px 0 0 0;
             margin: 0;
@@ -533,6 +518,10 @@
             border: 1px solid var(--border-color);
             border-radius: 4px;
         }
+        .todo-date-input {
+            margin-left: 4px;
+        }
+
         .recurrence-count {
             width: 60px;
             background-color: var(--input-bg);
@@ -783,93 +772,176 @@
 
         // Todo menu handlers
         document.addEventListener('click', async function(e) {
+            // Handle menu button clicks
             const menuBtn = e.target.closest('.todo-menu-btn');
+            
+            // Don't do anything if clicking on time or date inputs
+            if (e.target.closest('.todo-time-input, .todo-date-input, .recurrence-count, .recurrence-unit')) {
+                e.stopPropagation();
+                return;
+            }
+            
             if (menuBtn) {
                 e.stopPropagation();
+                e.preventDefault();
                 const li = menuBtn.parentElement;
                 const menu = li.querySelector('.todo-menu');
+                
+                // Close all other open menus
                 document.querySelectorAll('.todo-menu').forEach(m => {
-                    if (m !== menu) m.classList.remove('active');
+                    if (m !== menu) m.style.display = 'none';
                 });
                 
-                // Set the date input value before showing the menu
-                const dateInput = menu.querySelector('.todo-date-input');
-                dateInput.value = dateInput.dataset.due.split('T')[0];
+                // Toggle current menu
+                menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
                 
-                // Now show the menu
-                menu.classList.toggle('active');
+                // Close menu when clicking outside
+                if (menu.style.display === 'block') {
+                    const closeMenu = function(e) {
+                        // Don't close if clicking on menu or its inputs
+                        if (!menu.contains(e.target) && 
+                            e.target !== menuBtn && 
+                            !e.target.closest('.todo-time-input, .todo-date-input, .recurrence-count, .recurrence-unit')) {
+                            menu.style.display = 'none';
+                            document.removeEventListener('click', closeMenu);
+                        }
+                    };
+                    setTimeout(() => {
+                        document.addEventListener('click', closeMenu);
+                    }, 0);
+                } 
                 return;
             }
 
-            const menu = e.target.closest('.todo-menu');
-            if (!menu) {
-                // click outside hide menus
-                document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
-                return;
-            }
-
-            // Don't close menu if clicking on date or recurrence inputs
-            if (e.target.closest('.todo-date-input, .recurrence-count, .recurrence-unit')) {
-                return;
-            }
-
+            // Handle menu item clicks
             const menuItem = e.target.closest('.todo-menu-item');
             if (menuItem) {
+                e.preventDefault();
+                e.stopPropagation();
+                
                 const action = menuItem.dataset.action;
+                const li = menuItem.closest('.todo-item');
+                if (!li) return;
+                
                 if (action === 'delete') {
                     const todoId = menuItem.dataset.id;
                     const confirmed = confirm('Are you sure you want to delete this todo?');
-                    if (!confirmed) {
-                        // Keep menu open if user cancels
-                        return;
+                    if (!confirmed) return;
+                    
+                    try {
+                        await deleteTodo(todoId);
+                    } catch (err) {
+                        console.error('Error deleting todo:', err);
                     }
-                    deleteTodo(todoId);
                 } else if (action === 'save') {
-                    const li = menuItem.closest('.todo-item');
-                    if (!li) return;
                     const todoId = menuItem.dataset.id;
                     const checkbox = li.querySelector('.todo-checkbox');
                     const titleEl = li.querySelector('.todo-text');
                     const dateInput = li.querySelector('.todo-date-input');
+                    const timeInput = li.querySelector('.todo-time-input');
                     const countEl = li.querySelector('.recurrence-count');
                     const unitEl = li.querySelector('.recurrence-unit');
+                    
+                    // Combine date and time inputs
+                    let dueDate = null;
+                    // If date is explicitly cleared, clear the entire due date
+                    if (dateInput && dateInput.value === '') {
+                        dueDate = null;
+                    }
+                    // If date is set, use it with optional time
+                    else if (dateInput?.value) {
+                        dueDate = dateInput.value;
+                        if (timeInput?.value) {
+                            dueDate += 'T' + timeInput.value + ':00';
+                        }
+                    }
+                    // Only use the dataset.due if we're not explicitly clearing the date
+                    else if (dateInput?.dataset.due && !dateInput.value) {
+                        dueDate = dateInput.dataset.due;
+                    }
+                    
                     try {
-                        await fetch('/api/todo', {
+                        const response = await fetch('/api/todo', {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 id: Number(todoId),
                                 title: titleEl ? titleEl.textContent : '',
                                 completed: checkbox ? checkbox.checked : false,
-                                due_date: dateInput ? (dateInput.value || null) : null,
-                                recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                                recurrence_unit: unitEl && unitEl.value ? unitEl.value : null
+                                due_date: dueDate,
+                                recurrence_interval: countEl?.value ? Number(countEl.value) : null,
+                                recurrence_unit: unitEl?.value || null
                             })
                         });
+                        
+                        if (!response.ok) throw new Error('Failed to update todo');
+                        
+                        // Close menu after successful save
+                        const menu = li.querySelector('.todo-menu');
+                        if (menu) menu.style.display = 'none';
+                        
                         await loadTodosByProject();
-                    } catch(err){console.error(err);}            
+                    } catch (err) {
+                        console.error('Error updating todo:', err);
+                        alert('Failed to update todo. Please try again.');
+                    }
                 } else if (action === 'cancel') {
-                    document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
+                    // Just close the menu without saving
+                    const menu = li.querySelector('.todo-menu');
+                    if (menu) menu.style.display = 'none';
                     await loadTodosByProject();
                 }
+                return;
             }
-
-            // click outside hide menus
-            document.querySelectorAll('.todo-menu').forEach(m => m.classList.remove('active'));
+            
+            // Close all menus when clicking outside
+            document.querySelectorAll('.todo-menu').forEach(m => {
+                m.style.display = 'none';
+            });
         });
 
-        // When due date input cleared, blank out recurrence inputs (UI only)
-        document.addEventListener('change', function(e){
-            const input = e.target;
-            if(input && input.classList && input.classList.contains('todo-date-input')){
-                if(!input.value){
-                    const li = input.closest('.todo-item');
-                    if(li){
-                        const countEl = li.querySelector('.recurrence-count');
-                        const unitEl = li.querySelector('.recurrence-unit');
-                        if(countEl) countEl.value='';
-                        if(unitEl) unitEl.value='day';
+        // Handle keydown events on form inputs
+        document.addEventListener('keydown', function(e) {
+            // Check if Enter key is pressed on date, time, or recurrence inputs
+            if (e.key === 'Enter' && 
+                (e.target.matches('.todo-date-input, .todo-time-input, .recurrence-count, .recurrence-unit'))) {
+                e.preventDefault();
+                const li = e.target.closest('.todo-item');
+                if (li) {
+                    const saveBtn = li.querySelector('.todo-menu-item[data-action="save"]');
+                    if (saveBtn) {
+                        saveBtn.click();
                     }
+                }
+            }
+        });
+
+        // Handle date and time input changes
+        document.addEventListener('change', function(e) {
+            const input = e.target;
+            const li = input.closest('.todo-item');
+            if (!li) return;
+
+            // When date input is cleared, clear time and recurrence inputs
+            if (input.classList.contains('todo-date-input')) {
+                if (!input.value) {
+                    const timeInput = li.querySelector('.todo-time-input');
+                    const countEl = li.querySelector('.recurrence-count');
+                    const unitEl = li.querySelector('.recurrence-unit');
+                    if (timeInput) timeInput.value = '';
+                    if (countEl) countEl.value = '';
+                    if (unitEl) unitEl.value = 'day';
+                }
+            }
+            // When time is set but no date, set date to today
+            else if (input.classList.contains('todo-time-input') && input.value) {
+                const dateInput = li.querySelector('.todo-date-input');
+                if (dateInput && !dateInput.value) {
+                    const today = new Date();
+                    const yyyy = today.getFullYear();
+                    const mm = String(today.getMonth() + 1).padStart(2, '0');
+                    const dd = String(today.getDate()).padStart(2, '0');
+                    dateInput.value = `${yyyy}-${mm}-${dd}`;
                 }
             }
         });
@@ -886,7 +958,11 @@
         // Drag & Drop handlers
         document.addEventListener('dragstart', function(e){
             if (e.target.closest('textarea')) return;
+            
+            // If dragging the menu button, find the parent todo item
+            const menuBtn = e.target.closest('.todo-menu-btn');
             const projectTitle = e.target.closest('.project-title');
+            
             if (projectTitle && projectTitle.getAttribute('draggable') === 'true') {
                 const id = projectTitle.dataset.id;
                 e.dataTransfer.setData('application/json', JSON.stringify({ type: 'project', projectId: id }));
@@ -894,7 +970,9 @@
                 projectTitle.closest('.project-item').classList.add('dragging');
                 return; // handled project drag
             }
-            const item = e.target.closest('.todo-item');
+            
+            // Get the todo item, either directly or from the menu button
+            const item = menuBtn ? menuBtn.closest('.todo-item') : e.target.closest('.todo-item');
             if(item) {
                 // Prevent dragging todos from the "This Week" project
                 if (item.dataset.projectId === 'thisweek') {
@@ -1027,9 +1105,16 @@
                 const titleEl = itemEl ? itemEl.querySelector('.todo-text') : null;
                 const title = titleEl ? titleEl.textContent : '';
                 const dateInput = itemEl ? itemEl.querySelector('.todo-date-input') : null;
+                const timeInput = itemEl ? itemEl.querySelector('.todo-time-input') : null;
                 let dueDate = null;
-                if (dateInput) {
-                    dueDate = dateInput.value || (dateInput.dataset.due ? dateInput.dataset.due.split('T')[0] : null) || null;
+                if (dateInput?.value) {
+                    dueDate = dateInput.value;
+                    // If time is provided, append it to the date
+                    if (timeInput?.value) {
+                        dueDate += 'T' + timeInput.value + ':00';
+                    }
+                } else if (dateInput?.dataset.due) {
+                    dueDate = dateInput.dataset.due;
                 }
                 const countEl = itemEl ? itemEl.querySelector('.recurrence-count') : null;
                 const unitEl = itemEl ? itemEl.querySelector('.recurrence-unit') : null;
@@ -1512,21 +1597,24 @@
                     let dueDateHtml = '';
                     let recurrenceHtml = '';
                     if (todo.due_date) {
-                        // Use the raw date string (YYYY-MM-DD) to avoid timezone shift
-                        const dueLocal = todo.due_date.split('T')[0];
+                        // Extract date and time parts
+                        const [datePart, timePart] = todo.due_date.split('T');
+                        const timeStr = timePart ? ` ${timePart.substring(0, 5)}` : '';
+                        
                         // Build local date string (YYYY-MM-DD) without converting to UTC
                         const now = new Date();
                         const pad = (n) => String(n).padStart(2, '0');
                         const todayLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-                        let dueDateClass = '';
-                        if (dueLocal === todayLocal) {
+                        
+                        let dueDateClass = "";
+                        if (datePart === todayLocal) {
                             dueDateClass = "today";
-                        } else if (dueLocal < todayLocal && !todo.completed) {
+                        } else if (datePart < todayLocal && !todo.completed) {
                             dueDateClass = "overdue";
                         }
-                        dueDateHtml = `<span class="due-date ${dueDateClass}">🗓 ${dueLocal}</span>`;
+                        dueDateHtml = `<div class="due-date ${dueDateClass}">&#x1F5D3; ${datePart} &#x1F553; ${timeStr}</div>`;
                         if (todo.recurrence_interval && todo.recurrence_unit) {
-                            recurrenceHtml = `<span class="recurrence-info">&#x1f504; ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</span>`;
+                            recurrenceHtml = `<div class="recurrence-info ${dueDateClass}">&#x1f504; Every ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</div>`;
                         }
                     }
 
@@ -1534,13 +1622,20 @@
                             <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
                             <div class="todo-content">
                                 <pre class="todo-text" data-id="${todo.id}">${linkify(todo.title)}</pre>
-                                <div>${dueDateHtml}${recurrenceHtml}</div>
+                                ${dueDateHtml}
+                                ${recurrenceHtml}
                             </div>
                             <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
                             <div class="todo-menu">
-                                <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
-                                    <span>Due</span>
-                                    <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}">
+                                <div class="todo-menu-item" style="display:flex; flex-direction:column; gap:4px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span>Date</span>
+                                        <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" value="${todo.due_date ? todo.due_date.split('T')[0] : ''}">
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span>Time</span>
+                                        <input type="time" class="todo-time-input" data-id="${todo.id}" value="${todo.due_date && todo.due_date.includes('T') ? todo.due_date.split('T')[1].substring(0,5) : ''}">
+                                    </div>
                                 </div>
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
                                     <span>Repeat</span>
@@ -1837,6 +1932,10 @@
 
         // Load todos when page loads
         document.addEventListener('DOMContentLoaded', async function() {
+            // Make menu buttons not draggable to allow drag events to bubble to parent
+            document.querySelectorAll('.todo-menu-btn').forEach(btn => {
+                btn.setAttribute('draggable', 'false');
+            });
             // Check if dark mode is saved in localStorage
             const savedMode = localStorage.getItem('darkMode');
             if (savedMode === 'true') {
@@ -1961,9 +2060,32 @@
                 const checkbox = li ? li.querySelector('.todo-checkbox') : null;
                 const completed = checkbox ? checkbox.checked : false;
                 const dueInput = li ? li.querySelector('.todo-date-input') : null;
+                const timeInput = li ? li.querySelector('.todo-time-input') : null;
                 let dueDate = null;
-                if (dueInput) {
-                    dueDate = dueInput.value || (dueInput.dataset.due ? dueInput.dataset.due.split('T')[0] : null) || null;
+                
+                // If date is explicitly cleared, clear the entire due date
+                if (dueInput && dueInput.value === '') {
+                    dueDate = null;
+                }
+                // If time is set but no date, use today's date
+                else if (timeInput?.value && (!dueInput || !dueInput.value)) {
+                    const today = new Date();
+                    const yyyy = today.getFullYear();
+                    const mm = String(today.getMonth() + 1).padStart(2, '0');
+                    const dd = String(today.getDate()).padStart(2, '0');
+                    dueDate = `${yyyy}-${mm}-${dd}T${timeInput.value}:00`;
+                }
+                // If date is set, use it with optional time
+                else if (dueInput?.value) {
+                    dueDate = dueInput.value;
+                    // If time is provided, append it to the date
+                    if (timeInput?.value) {
+                        dueDate += 'T' + timeInput.value + ':00';
+                    }
+                } 
+                // Only use the existing due date if we're not explicitly clearing the date
+                else if (dueInput?.dataset.due && !dueInput.value) {
+                    dueDate = dueInput.dataset.due;
                 }
                 const countEl = li ? li.querySelector('.recurrence-count') : null;
                 const unitEl = li ? li.querySelector('.recurrence-unit') : null;
@@ -2016,11 +2138,32 @@
             const todoItem = checkbox.parentElement;
             const titleElement = todoItem.querySelector('.todo-text');
             const title = titleElement.textContent;
-            const dueDateInput = todoItem.querySelector('.todo-date-input');
+            
+            const dueInput = todoItem.querySelector('.todo-date-input');
+            const timeInput = todoItem.querySelector('.todo-time-input');
             let dueDate = null;
-            if (dueDateInput) {
-                dueDate = dueDateInput.value || dueDateInput.dataset.due.split('T')[0] || null;
+            
+            // If time is set but no date, use today's date
+            if (timeInput?.value && (!dueInput || !dueInput.value)) {
+                const today = new Date();
+                const yyyy = today.getFullYear();
+                const mm = String(today.getMonth() + 1).padStart(2, '0');
+                const dd = String(today.getDate()).padStart(2, '0');
+                dueDate = `${yyyy}-${mm}-${dd}T${timeInput.value}:00`;
             }
+            // If date is set, use it with optional time
+            else if (dueInput?.value) {
+                dueDate = dueInput.value;
+                // If time is provided, append it to the date
+                if (timeInput?.value) {
+                    dueDate += 'T' + timeInput.value + ':00';
+                }
+            } 
+            // Keep the existing due date if no new date is selected
+            else if (dueInput?.dataset.due) {
+                dueDate = dueInput.dataset.due;
+            }
+            
             const countEl = todoItem.querySelector('.recurrence-count');
             const unitEl = todoItem.querySelector('.recurrence-unit');
             const recInt = countEl && countEl.value ? Number(countEl.value) : null;
