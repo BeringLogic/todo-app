@@ -46,6 +46,9 @@ var indexHTML string
 //go:embed favicon.svg
 var faviconSVG []byte
 
+//go:embed style.css
+var styleCSS []byte
+
 var db *sql.DB
 
 func init() {
@@ -596,6 +599,12 @@ func createRouter() http.Handler {
 	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Write(faviconSVG)
+	})
+
+	// Serve style.css
+	mux.HandleFunc("/style.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		w.Write(styleCSS)
 	})
 
 	// Serve embedded index.html at root
