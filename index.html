@@ -41,6 +41,17 @@
     <div class="projects-container"></div>
 
     <script>
+// Utility: format date as strict RFC3339 (no ms, always ends in Z)
+function toRFC3339NoMillis(date) {
+    const pad = (n) => n.toString().padStart(2, '0');
+    return date.getUTCFullYear() + '-' +
+        pad(date.getUTCMonth() + 1) + '-' +
+        pad(date.getUTCDate()) + 'T' +
+        pad(date.getUTCHours()) + ':' +
+        pad(date.getUTCMinutes()) + ':' +
+        pad(date.getUTCSeconds()) + 'Z';
+}
+
         /**
          * Build a read-only project group that lists todos due in the next 6 days.
          * @param {Array} todos – the todos that are due soon
@@ -282,50 +293,73 @@
                     const timeInput = li.querySelector('.todo-time-input');
                     const countEl = li.querySelector('.recurrence-count');
                     const unitEl = li.querySelector('.recurrence-unit');
-                    
-                    // Combine date and time inputs
+
+                    // Combine date and time inputs using strict RFC3339 formatting
                     let dueDate = null;
-                    // If date is explicitly cleared, clear the entire due date
                     if (dateInput && dateInput.value === '') {
-                        dueDate = null;
-                    }
-                    // If date is set, use it with optional time
-                    else if (dateInput?.value) {
-                        dueDate = dateInput.value;
+                        dueDate = '';
+                    } else if (timeInput?.value && (!dateInput || !dateInput.value)) {
+                        const now = new Date();
+                        const [hours, minutes] = timeInput.value.split(':').map(Number);
+                        const localDate = new Date(
+                            now.getFullYear(),
+                            now.getMonth(),
+                            now.getDate(),
+                            hours,
+                            minutes,
+                            0,
+                            0
+                        );
+                        dueDate = toRFC3339NoMillis(localDate);
+                    } else if (dateInput?.value) {
+                        const dateParts = dateInput.value.split('-');
+                        const localDate = new Date(
+                            parseInt(dateParts[0]),
+                            parseInt(dateParts[1]) - 1,
+                            parseInt(dateParts[2])
+                        );
                         if (timeInput?.value) {
-                            dueDate += 'T' + timeInput.value + ':00';
+                            const [hours, minutes] = timeInput.value.split(':').map(Number);
+                            localDate.setHours(hours, minutes, 0, 0);
+                        } else {
+                            localDate.setHours(0, 0, 0, 0);
+                        }
+                        dueDate = toRFC3339NoMillis(localDate);
+                    } else if (dateInput?.dataset.due && !dateInput.value) {
+                        dueDate = dateInput.dataset.due;
+                        if (dueDate && !dueDate.endsWith('Z')) {
+                            const date = new Date(dueDate);
+                            if (!isNaN(date.getTime())) {
+                                dueDate = toRFC3339NoMillis(date);
+                            }
                         }
                     }
-                    // Only use the dataset.due if we're not explicitly clearing the date
-                    else if (dateInput?.dataset.due && !dateInput.value) {
-                        dueDate = dateInput.dataset.due;
-                    }
+                    // Log outgoing payload and due_date value/type
+                    const outgoingPayload = {
+                        id: Number(todoId),
+                        title: titleEl ? titleEl.textContent : '',
+                        completed: checkbox ? checkbox.checked : false,
+                        due_date: dueDate,
+                        recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null,
+                        position: Number(li.dataset.position)
+                    };
                     
                     try {
                         const response = await fetch('/api/todo', {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                id: Number(todoId),
-                                title: titleEl ? titleEl.textContent : '',
-                                completed: checkbox ? checkbox.checked : false,
-                                due_date: dueDate,
-                                recurrence_interval: countEl?.value ? Number(countEl.value) : null,
-                                recurrence_unit: unitEl?.value || null
-                            })
+                            body: JSON.stringify(outgoingPayload)
                         });
-                        
                         if (!response.ok) throw new Error('Failed to update todo');
-                        
                         // Close menu after successful save
-                        const menu = li.querySelector('.todo-menu');
+                            const menu = li.querySelector('.todo-menu');
                         if (menu) menu.style.display = 'none';
-                        
                         await loadTodosByProject();
                     } catch (err) {
                         console.error('Error updating todo:', err);
                         alert('Failed to update todo. Please try again.');
-                    }
+}
                 } else if (action === 'cancel') {
                     // Just close the menu without saving
                     const menu = li.querySelector('.todo-menu');
@@ -661,8 +695,6 @@
         }
 
         async function importGoogleTasks(exportJson) {
-            console.log('Importing data:', JSON.stringify(exportJson, null, 2).substring(0, 1000) + '...');
-            
             if (!exportJson) throw new Error('No data to import');
             
             // Create and show modal
@@ -1038,15 +1070,21 @@
                     let dueDateHtml = '';
                     let recurrenceHtml = '';
                     if (todo.due_date) {
-                        // Extract date and time parts
-                        const [datePart, timePart] = todo.due_date.split('T');
-                        const timeStr = timePart ? ` ${timePart.substring(0, 5)}` : '';
-                        
-                        // Build local date string (YYYY-MM-DD) without converting to UTC
-                        const now = new Date();
+                        // Parse RFC3339 UTC string and convert to local time
+                        const utcDate = new Date(todo.due_date);
                         const pad = (n) => String(n).padStart(2, '0');
+                        const localYear = utcDate.getFullYear();
+                        const localMonth = pad(utcDate.getMonth() + 1);
+                        const localDay = pad(utcDate.getDate());
+                        const localHours = pad(utcDate.getHours());
+                        const localMinutes = pad(utcDate.getMinutes());
+                        const datePart = `${localYear}-${localMonth}-${localDay}`;
+                        const timeStr = `${localHours}:${localMinutes}`;
+
+                        // Build today's local date string for comparison
+                        const now = new Date();
                         const todayLocal = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-                        
+
                         let dueDateClass = "";
                         if (datePart === todayLocal) {
                             dueDateClass = "today";
@@ -1071,11 +1109,11 @@
                                 <div class="todo-menu-item" style="display:flex; flex-direction:column; gap:4px;">
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span>Date</span>
-                                        <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" value="${todo.due_date ? todo.due_date.split('T')[0] : ''}">
+                                        <input type="date" class="todo-date-input" data-id="${todo.id}" data-due="${todo.due_date || ''}" value="${(() => { if (!todo.due_date) return ''; const d = new Date(todo.due_date); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); })()}">
                                     </div>
                                     <div style="display:flex; align-items:center; gap:8px;">
                                         <span>Time</span>
-                                        <input type="time" class="todo-time-input" data-id="${todo.id}" value="${todo.due_date && todo.due_date.includes('T') ? todo.due_date.split('T')[1].substring(0,5) : ''}">
+                                        <input type="time" class="todo-time-input" data-id="${todo.id}" value="${(() => { if (!todo.due_date) return ''; const d = new Date(todo.due_date); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })()}">
                                     </div>
                                 </div>
                                 <div class="todo-menu-item" style="display:flex; align-items:center; gap:8px;">
@@ -1340,9 +1378,8 @@
             if(!file) return;
             try{
                 const text = await file.text();
-                console.log('Raw JSON:', text.substring(0, 500) + '...'); // Log first 500 chars
                 const data = JSON.parse(text);
-                console.log('Parsed JSON structure:', JSON.stringify(data, null, 2).substring(0, 1000) + '...');
+                
                 await importGoogleTasks(data);
                 alert('Import completed');
                 await loadTodosByProject();
@@ -1506,45 +1543,80 @@
                 
                 // If date is explicitly cleared, clear the entire due date
                 if (dueInput && dueInput.value === '') {
-                    dueDate = null;
+                    dueDate = ''; // Send empty string to clear the date
                 }
                 // If time is set but no date, use today's date
                 else if (timeInput?.value && (!dueInput || !dueInput.value)) {
-                    const today = new Date();
-                    const yyyy = today.getFullYear();
-                    const mm = String(today.getMonth() + 1).padStart(2, '0');
-                    const dd = String(today.getDate()).padStart(2, '0');
-                    dueDate = `${yyyy}-${mm}-${dd}T${timeInput.value}:00`;
+                    const now = new Date();
+                    const [hours, minutes] = timeInput.value.split(':').map(Number);
+                    // Create date in local timezone
+                    const localDate = new Date(
+                        now.getFullYear(),
+                        now.getMonth(),
+                        now.getDate(),
+                        hours,
+                        minutes,
+                        0,
+                        0
+                    );
+                    // Convert to UTC and format as strict RFC3339 (no ms)
+                    dueDate = toRFC3339NoMillis(localDate);
                 }
                 // If date is set, use it with optional time
                 else if (dueInput?.value) {
-                    dueDate = dueInput.value;
-                    // If time is provided, append it to the date
+                    const dateParts = dueInput.value.split('-');
+                    // Create date in local timezone
+                    const localDate = new Date(
+                        parseInt(dateParts[0]),
+                        parseInt(dateParts[1]) - 1, // months are 0-indexed
+                        parseInt(dateParts[2])
+                    );
+                    
                     if (timeInput?.value) {
-                        dueDate += 'T' + timeInput.value + ':00';
+                        const [hours, minutes] = timeInput.value.split(':').map(Number);
+                        localDate.setHours(hours, minutes, 0, 0);
+                    } else {
+                        localDate.setHours(0, 0, 0, 0);
                     }
+                    
+                    // Convert to UTC and format as strict RFC3339 (no ms)
+                    dueDate = toRFC3339NoMillis(localDate);
                 } 
                 // Only use the existing due date if we're not explicitly clearing the date
                 else if (dueInput?.dataset.due && !dueInput.value) {
                     dueDate = dueInput.dataset.due;
+                    // If it's not already in ISO format, parse and convert it
+                    if (dueDate && !dueDate.endsWith('Z')) {
+                        const date = new Date(dueDate);
+                        if (!isNaN(date.getTime())) {
+                            dueDate = toRFC3339NoMillis(date);
+                        }
+                    }
+                    // Ensure dueDate is in RFC3339 format (no milliseconds)
+                    if (dueDate && dueDate.includes('.')) {
+                        dueDate = dueDate.replace(/\.\d{3}Z$/, 'Z');
+                    }
                 }
                 const countEl = li ? li.querySelector('.recurrence-count') : null;
                 const unitEl = li ? li.querySelector('.recurrence-unit') : null;
+                
+                // Log outgoing payload and due_date value/type
+                const outgoingPayload = {
+                    id: Number(id),
+                    title: newTitle,
+                    completed: completed,
+                    due_date: dueDate,
+                    recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
+                    recurrence_unit: unitEl && unitEl.value ? unitEl.value : null,
+                    position: Number(li.dataset.position)
+                };
                 
                 const response = await fetch('/api/todo', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        id: Number(id),
-                        title: newTitle,
-                        completed: completed,
-                        due_date: dueDate,
-                        recurrence_interval: countEl && countEl.value ? Number(countEl.value) : null,
-                        recurrence_unit: unitEl && unitEl.value ? unitEl.value : null,
-                        position: Number(li.dataset.position)
-                    })
+                    body: JSON.stringify(outgoingPayload)
                 });
 
                 if (!response.ok) {
@@ -1586,19 +1658,40 @@
             
             // If time is set but no date, use today's date
             if (timeInput?.value && (!dueInput || !dueInput.value)) {
-                const today = new Date();
-                const yyyy = today.getFullYear();
-                const mm = String(today.getMonth() + 1).padStart(2, '0');
-                const dd = String(today.getDate()).padStart(2, '0');
-                dueDate = `${yyyy}-${mm}-${dd}T${timeInput.value}:00`;
+                const now = new Date();
+                const [hours, minutes] = timeInput.value.split(':').map(Number);
+                // Create date in local timezone
+                const localDate = new Date(
+                    now.getFullYear(),
+                    now.getMonth(),
+                    now.getDate(),
+                    hours,
+                    minutes,
+                    0,
+                    0
+                );
+                // Convert to UTC and format as RFC3339 with 'Z' timezone
+                dueDate = localDate.toISOString();
             }
             // If date is set, use it with optional time
             else if (dueInput?.value) {
-                dueDate = dueInput.value;
-                // If time is provided, append it to the date
+                const dateParts = dueInput.value.split('-');
+                // Create date in local timezone
+                const localDate = new Date(
+                    parseInt(dateParts[0]),
+                    parseInt(dateParts[1]) - 1, // months are 0-indexed
+                    parseInt(dateParts[2])
+                );
+                
                 if (timeInput?.value) {
-                    dueDate += 'T' + timeInput.value + ':00';
+                    const [hours, minutes] = timeInput.value.split(':').map(Number);
+                    localDate.setHours(hours, minutes, 0, 0);
+                } else {
+                    localDate.setHours(0, 0, 0, 0);
                 }
+                
+                // Convert to UTC and format as RFC3339 with 'Z' timezone
+                dueDate = localDate.toISOString();
             } 
             // Keep the existing due date if no new date is selected
             else if (dueInput?.dataset.due) {

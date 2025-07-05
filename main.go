@@ -23,7 +23,7 @@ type Todo struct {
 	Completed          bool       `json:"completed"`
 	CreatedAt          time.Time  `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
-	DueDate            *string    `json:"due_date,omitempty"`
+	DueDate            *time.Time `json:"due_date,omitempty"`
 	RecurrenceInterval *int       `json:"recurrence_interval,omitempty"`
 	RecurrenceUnit     *string    `json:"recurrence_unit,omitempty"`
 	Position           int        `json:"position"`
@@ -292,7 +292,9 @@ func deleteProject(w http.ResponseWriter, r *http.Request) {
 
 func getTodos(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(`
-		SELECT id, title, completed, created_at, completed_at, due_date, recurrence_interval, recurrence_unit, project_id, position 
+		SELECT id, title, completed, created_at, completed_at, 
+		       datetime(due_date) as due_date, 
+		       recurrence_interval, recurrence_unit, project_id, position 
 		FROM todos 
 		ORDER BY project_id, completed, position
 	`)
@@ -305,9 +307,39 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 	todos := make([]Todo, 0)
 	for rows.Next() {
 		var todo Todo
-		if err := rows.Scan(&todo.ID, &todo.Title, &todo.Completed, &todo.CreatedAt, &todo.CompletedAt, &todo.DueDate, &todo.RecurrenceInterval, &todo.RecurrenceUnit, &todo.ProjectID, &todo.Position); err != nil {
+		var dueDateStr sql.NullString
+		if err := rows.Scan(
+			&todo.ID,
+			&todo.Title,
+			&todo.Completed,
+			&todo.CreatedAt,
+			&todo.CompletedAt,
+			&dueDateStr,
+			&todo.RecurrenceInterval,
+			&todo.RecurrenceUnit,
+			&todo.ProjectID,
+			&todo.Position,
+		); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// Parse the due date string into a time.Time pointer
+		if dueDateStr.Valid && dueDateStr.String != "" {
+			var parsedTime time.Time
+			var err error
+
+			// First try parsing as RFC3339 (UTC timestamp with timezone)
+			parsedTime, err = time.Parse(time.RFC3339, dueDateStr.String)
+			if err != nil {
+				// If that fails, try parsing as database datetime format (YYYY-MM-DD HH:MM:SS)
+				parsedTime, err = time.ParseInLocation("2006-01-02 15:04:05", dueDateStr.String, time.UTC)
+				if err != nil {
+					log.Printf("Warning: could not parse due date '%s': %v", dueDateStr.String, err)
+					continue
+				}
+			}
+			// Ensure it's in UTC
+			todo.DueDate = &parsedTime
 		}
 		todos = append(todos, todo)
 	}
@@ -317,199 +349,324 @@ func getTodos(w http.ResponseWriter, r *http.Request) {
 }
 
 func addTodo(w http.ResponseWriter, r *http.Request) {
-	var todo Todo
-	if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
+	var requestData struct {
+		Title              string  `json:"title"`
+		Completed          bool    `json:"completed"`
+		ProjectID          int     `json:"project_id"`
+		DueDate            *string `json:"due_date,omitempty"`
+		RecurrenceInterval *int    `json:"recurrence_interval,omitempty"`
+		RecurrenceUnit     *string `json:"recurrence_unit,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Determine position so the new todo appears at the top of the active list for its project
-	var minPos sql.NullInt64
-	if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if minPos.Valid {
-		todo.Position = int(minPos.Int64) - 1
-	} else {
-		todo.Position = 0
-	}
-
-	stmt, err := db.Prepare("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?, ?, ?, ?, ?, ?, ?)")
+	// Shift all existing todos in the same project down by 1 position
+	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer stmt.Close()
-
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.ProjectID, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.Position); err != nil {
+	_, err = tx.Exec("UPDATE todos SET position = position + 1 WHERE project_id = ?", requestData.ProjectID)
+	if err != nil {
+		tx.Rollback()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	// Parse the due date if provided (expecting UTC timestamp from frontend)
+	var dueDate *time.Time
+	if requestData.DueDate != nil && *requestData.DueDate != "" {
+		parsedTime, err := time.Parse(time.RFC3339, *requestData.DueDate)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "invalid date format, expected RFC3339 format (e.g., 2023-01-02T15:04:05Z)", http.StatusBadRequest)
+			return
+		}
+		// Ensure it's in UTC
+		parsedTime = parsedTime.UTC()
+		dueDate = &parsedTime
+	}
+
+	var dueDateInterface interface{}
+	if dueDate != nil {
+		dueDateInterface = dueDate.Format(time.RFC3339)
+	}
+
+	result, err := tx.Exec(
+		"INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?, ?, ?, datetime(?, 'utc'), ?, ?, 0)",
+		requestData.Title,
+		requestData.Completed,
+		requestData.ProjectID,
+		dueDateInterface,
+		requestData.RecurrenceInterval,
+		requestData.RecurrenceUnit,
+	)
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the created todo
+	createdTodo := Todo{
+		ID:                 int(id),
+		Title:              requestData.Title,
+		Completed:          requestData.Completed,
+		ProjectID:          requestData.ProjectID,
+		DueDate:            dueDate,
+		RecurrenceInterval: requestData.RecurrenceInterval,
+		RecurrenceUnit:     requestData.RecurrenceUnit,
+		Position:           0,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(createdTodo)
 }
 
 func updateTodo(w http.ResponseWriter, r *http.Request) {
-	var todo Todo
-	if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
+	// Helper to check if a todo is currently completed
+	currentTodoIsCompleted := func(todoID int) bool {
+		var completed bool
+		err := db.QueryRow("SELECT completed FROM todos WHERE id = ?", todoID).Scan(&completed)
+		return err == nil && completed
+	}
+
+	// Define a struct to parse the incoming request
+	var requestData struct {
+		ID                 int     `json:"id"`
+		Title              string  `json:"title"`
+		Completed          bool    `json:"completed"`
+		ProjectID          int     `json:"project_id"`
+		DueDate            *string `json:"due_date,omitempty"`
+		RecurrenceInterval *int    `json:"recurrence_interval,omitempty"`
+		RecurrenceUnit     *string `json:"recurrence_unit,omitempty"`
+		Position           int     `json:"position,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if todo.ID == 0 {
+	if requestData.ID == 0 {
 		http.Error(w, "ID is required", http.StatusBadRequest)
 		return
 	}
 
 	// Get the current todo to preserve position and project ID if not provided
-	var currentTodo Todo
-	err := db.QueryRow("SELECT position, project_id FROM todos WHERE id = ?", todo.ID).
-		Scan(&currentTodo.Position, &currentTodo.ProjectID)
+	var currentTodo struct {
+		Position  int
+		ProjectID int
+		DueDate   sql.NullString
+	}
+
+	err := db.QueryRow("SELECT position, project_id, datetime(due_date) as due_date FROM todos WHERE id = ?", requestData.ID).
+		Scan(&currentTodo.Position, &currentTodo.ProjectID, &currentTodo.DueDate)
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Preserve the existing position if not set in the update
-	if todo.Position == 0 {
-		todo.Position = currentTodo.Position
-	}
-
-	// Ensure ProjectID is set (needed for recurring insertion)
-	if todo.ProjectID == 0 {
-		todo.ProjectID = currentTodo.ProjectID
-	}
-
-	// Fetch previous completion state to detect transition
-	var prevCompleted bool
-	var prevCompletedAt sql.NullTime
-	if err := db.QueryRow("SELECT completed, completed_at FROM todos WHERE id = ?", todo.ID).Scan(&prevCompleted, &prevCompletedAt); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// If transitioning from completed to active (uncomplete), move todo to top of active list
-	if prevCompleted && !todo.Completed {
-		var minPos sql.NullInt64
-		if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		newPos := 0
-		if minPos.Valid {
-			newPos = int(minPos.Int64) - 1
-		}
-		todo.Position = newPos
-	}
-
-	// If transitioning from active to completed
-	if !prevCompleted && todo.Completed {
-		// move todo to top of completed list
-		var minPosCompleted sql.NullInt64
-		if err := db.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 1", todo.ProjectID).Scan(&minPosCompleted); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if minPosCompleted.Valid {
-			todo.Position = int(minPosCompleted.Int64) - 1
+	// Parse the due date if provided (expecting UTC timestamp from frontend)
+	var dueDate *time.Time
+	if requestData.DueDate != nil {
+		// If the due date is being cleared
+		if *requestData.DueDate == "" {
+			dueDate = nil
 		} else {
-			todo.Position = 0
+			// Parse as RFC3339 (UTC timestamp with timezone)
+			parsedTime, err := time.Parse(time.RFC3339, *requestData.DueDate)
+			if err != nil {
+				http.Error(w, "invalid date format, expected RFC3339 format (e.g., 2023-01-02T15:04:05Z)", http.StatusBadRequest)
+				return
+			}
+			// Ensure it's in UTC
+			parsedTime = parsedTime.UTC()
+			dueDate = &parsedTime
 		}
-
-		// Handle recurring logic
-		if todo.RecurrenceInterval != nil && todo.RecurrenceUnit != nil {
-			tx, err := db.Begin()
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			// complete current
-			now := time.Now()
-			todo.CompletedAt = &now
-			_, err = tx.Exec("UPDATE todos SET title=?, completed=1, completed_at=?, due_date=?, recurrence_interval=?, recurrence_unit=?, position=? WHERE id=?", todo.Title, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.Position, todo.ID)
-			if err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			// compute next due date
-			var nextDue string
-			if todo.DueDate != nil {
-				t, err := time.Parse("2006-01-02", *todo.DueDate)
-				if err != nil {
-					tx.Rollback()
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				interval := *todo.RecurrenceInterval
-				switch *todo.RecurrenceUnit {
-				case "day":
-					t = t.AddDate(0, 0, interval)
-				case "week":
-					t = t.AddDate(0, 0, 7*interval)
-				case "month":
-					t = t.AddDate(0, interval, 0)
-				case "year":
-					t = t.AddDate(interval, 0, 0)
-				}
-				nextDue = t.Format("2006-01-02")
-			}
-			// Get the minimum position for active todos to place the new one at the top
-			var minPos sql.NullInt64
-			if err := tx.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", todo.ProjectID).Scan(&minPos); err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			newPos := 0
-			if minPos.Valid {
-				newPos = int(minPos.Int64) - 1
-			}
-
-			// insert new row at the top of the list
-			_, err = tx.Exec("INSERT INTO todos (title, completed, project_id, due_date, recurrence_interval, recurrence_unit, position) VALUES (?,?,?,?,?,?,?)", todo.Title, 0, todo.ProjectID, sql.NullString{String: nextDue, Valid: nextDue != ""}, todo.RecurrenceInterval, todo.RecurrenceUnit, newPos)
-			if err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if err := tx.Commit(); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
+	} else if currentTodo.DueDate.Valid && currentTodo.DueDate.String != "" {
+		// Keep the existing due date if not being updated
+		// Parse as UTC timestamp from database
+		parsedTime, err := time.Parse(time.RFC3339, currentTodo.DueDate.String)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error parsing existing due date: %v", err), http.StatusInternalServerError)
 			return
-		} else {
-			// Non-recurring handling
-			now := time.Now()
-			todo.CompletedAt = &now
 		}
-	}
-	if !todo.Completed {
-		todo.CompletedAt = nil
+		dueDate = &parsedTime
 	}
 
-	// Clear recurrence fields if interval is 0 or unit is empty
-	if (todo.RecurrenceInterval != nil && *todo.RecurrenceInterval == 0) ||
-		(todo.RecurrenceUnit != nil && *todo.RecurrenceUnit == "") {
-		todo.RecurrenceInterval = nil
-		todo.RecurrenceUnit = nil
+	// Use current project ID and position if not provided in the request
+	projectID := requestData.ProjectID
+	if projectID == 0 {
+		projectID = currentTodo.ProjectID
 	}
 
-	stmt, err := db.Prepare("UPDATE todos SET title = ?, completed = ?, completed_at = ?, due_date = ?, recurrence_interval = ?, recurrence_unit = ?, project_id = ?, position = ? WHERE id = ?")
+	position := requestData.Position
+	if position == 0 {
+		position = currentTodo.Position
+	}
+
+	// Prepare the due date for SQL
+	var dueDateInterface interface{}
+	if dueDate != nil {
+		dueDateInterface = dueDate.Format(time.RFC3339)
+	}
+
+	// Begin transaction for atomic position updates
+	tx, err := db.Begin()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer stmt.Close()
 
-	if _, err := stmt.Exec(todo.Title, todo.Completed, todo.CompletedAt, todo.DueDate, todo.RecurrenceInterval, todo.RecurrenceUnit, todo.ProjectID, todo.Position, todo.ID); err != nil {
+	// Determine if completed status is changing and handle position logic
+	var newPosition int
+	if requestData.Completed && !currentTodoIsCompleted(requestData.ID) {
+		// Moving to completed: shift all completed todos down and set this to top
+		row := tx.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 1", projectID)
+		var minCompleted sql.NullInt64
+		if err := row.Scan(&minCompleted); err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if minCompleted.Valid {
+			_, err = tx.Exec("UPDATE todos SET position = position + 1 WHERE project_id = ? AND completed = 1", projectID)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			newPosition = int(minCompleted.Int64) - 1
+		} else {
+			newPosition = 0
+		}
+	} else if !requestData.Completed && currentTodoIsCompleted(requestData.ID) {
+		// Moving to active: shift all active todos down and set this to top
+		row := tx.QueryRow("SELECT MIN(position) FROM todos WHERE project_id = ? AND completed = 0", projectID)
+		var minActive sql.NullInt64
+		if err := row.Scan(&minActive); err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if minActive.Valid {
+			_, err = tx.Exec("UPDATE todos SET position = position + 1 WHERE project_id = ? AND completed = 0", projectID)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			newPosition = int(minActive.Int64) - 1
+		} else {
+			newPosition = 0
+		}
+	} else {
+		// No status change: keep position
+		newPosition = position
+	}
+
+	// Update the todo in the database
+	_, err = tx.Exec(
+		"UPDATE todos SET title = ?, completed = ?, project_id = ?, due_date = datetime(?, 'utc'), recurrence_interval = ?, recurrence_unit = ?, position = ? WHERE id = ?",
+		requestData.Title,
+		requestData.Completed,
+		projectID,
+		dueDateInterface,
+		requestData.RecurrenceInterval,
+		requestData.RecurrenceUnit,
+		newPosition,
+		requestData.ID,
+	)
+	if err != nil {
+		tx.Rollback()
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	// If a recurring todo is being completed, generate the next occurrence
+	// The next occurrence will keep the same time-of-day as the original due date.
+	if requestData.Completed && !currentTodoIsCompleted(requestData.ID) && requestData.RecurrenceInterval != nil && requestData.RecurrenceUnit != nil {
+		var baseDue time.Time
+		if dueDate != nil {
+			baseDue = *dueDate
+		} else {
+			baseDue = time.Now().UTC()
+		}
+
+		// Calculate the next due date, preserving the time of day
+		var nextDue time.Time
+		switch strings.ToLower(*requestData.RecurrenceUnit) {
+		case "day", "days":
+			nextDue = baseDue.AddDate(0, 0, *requestData.RecurrenceInterval)
+		case "week", "weeks":
+			nextDue = baseDue.AddDate(0, 0, 7*(*requestData.RecurrenceInterval))
+		case "month", "months":
+			nextDue = baseDue.AddDate(0, *requestData.RecurrenceInterval, 0)
+		case "year", "years":
+			nextDue = baseDue.AddDate(*requestData.RecurrenceInterval, 0, 0)
+		default:
+			// Unknown unit, skip recurrence
+			nextDue = time.Time{}
+		}
+
+		// Explicitly preserve hour, minute, second, nanosecond from baseDue (already preserved by AddDate, but this is robust)
+		if !nextDue.IsZero() {
+			nextDue = time.Date(
+				nextDue.Year(), nextDue.Month(), nextDue.Day(),
+				baseDue.Hour(), baseDue.Minute(), baseDue.Second(), baseDue.Nanosecond(),
+				time.UTC,
+			)
+			_, err := tx.Exec(
+				"INSERT INTO todos (title, completed, created_at, due_date, recurrence_interval, recurrence_unit, project_id, position) VALUES (?, 0, datetime('now', 'utc'), datetime(?, 'utc'), ?, ?, ?, 0)",
+				requestData.Title,
+				nextDue.Format(time.RFC3339),
+				requestData.RecurrenceInterval,
+				requestData.RecurrenceUnit,
+				projectID,
+			)
+			if err != nil {
+				tx.Rollback()
+				http.Error(w, "Failed to create next recurring todo: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the updated todo
+	updatedTodo := Todo{
+		ID:                 requestData.ID,
+		Title:              requestData.Title,
+		Completed:          requestData.Completed,
+		ProjectID:          projectID,
+		DueDate:            dueDate,
+		RecurrenceInterval: requestData.RecurrenceInterval,
+		RecurrenceUnit:     requestData.RecurrenceUnit,
+		Position:           newPosition,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedTodo)
 }
 
 func deleteTodo(w http.ResponseWriter, r *http.Request) {
