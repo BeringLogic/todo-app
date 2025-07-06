@@ -594,13 +594,28 @@ function toRFC3339NoMillis(date) {
                 const timeInput = itemEl ? itemEl.querySelector('.todo-time-input') : null;
                 let dueDate = null;
                 if (dateInput?.value) {
-                    dueDate = dateInput.value;
-                    // If time is provided, append it to the date
+                    // Create a date object from the input values
+                    const [year, month, day] = dateInput.value.split('-').map(Number);
+                    let date = new Date();
+                    date.setFullYear(year, month - 1, day);
+                    
+                    // Set time if provided
                     if (timeInput?.value) {
-                        dueDate += 'T' + timeInput.value + ':00';
+                        const [hours, minutes] = timeInput.value.split(':').map(Number);
+                        date.setHours(hours, minutes, 0, 0);
+                    } else {
+                        date.setHours(0, 0, 0, 0);
                     }
+                    
+                    dueDate = toRFC3339NoMillis(date);
                 } else if (dateInput?.dataset.due) {
-                    dueDate = dateInput.dataset.due;
+                    // If we have a due date from dataset, ensure it's in the correct format
+                    const date = new Date(dateInput.dataset.due);
+                    if (!isNaN(date.getTime())) {
+                        dueDate = toRFC3339NoMillis(date);
+                    } else {
+                        dueDate = dateInput.dataset.due;
+                    }
                 }
                 const countEl = itemEl ? itemEl.querySelector('.recurrence-count') : null;
                 const unitEl = itemEl ? itemEl.querySelector('.recurrence-unit') : null;
