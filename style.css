@@ -324,7 +324,6 @@ body.dark-mode .theme-toggle .moon {
     width: 215px;
     min-width: 215px;
     padding: 12px;
-    cursor: pointer;
     height: 97%;
     display: flex;
     flex-direction: column;
