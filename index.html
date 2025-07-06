@@ -224,13 +224,24 @@ function toRFC3339NoMillis(date) {
 
         // Todo menu handlers
         document.addEventListener('click', async function(e) {
-            // Handle menu button clicks
+            // Handle menu button clicks or clicks on due date/recurrence info
             const menuBtn = e.target.closest('.todo-menu-btn');
+            const dueDateEl = e.target.closest('.due-date, .recurrence-info');
             
             // Don't do anything if clicking on time or date inputs
             if (e.target.closest('.todo-time-input, .todo-date-input, .recurrence-count, .recurrence-unit')) {
                 e.stopPropagation();
                 return;
+            }
+            
+            // If clicking on due date or recurrence info, find the menu button
+            if (dueDateEl && !menuBtn) {
+                const li = dueDateEl.closest('li.todo-item');
+                if (li) {
+                    const btn = li.querySelector('.todo-menu-btn');
+                    if (btn) btn.click();
+                    return;
+                }
             }
             
             if (menuBtn) {
