@@ -27,10 +27,15 @@
                 <span>↑</span>
                 <span>Import Database</span>
             </div>
+            <div class="dropdown-item" onclick="document.getElementById('importCalendarFile').click()">
+                <span>📅</span>
+                <span>Import Calendar</span>
+            </div>
         </div>
     </div>
     <input type="file" id="importFile" accept="application/json" style="display:none" />
     <input type="file" id="importDbFile" accept=".json" style="display:none" />
+    <input type="file" id="importCalendarFile" accept=".ics,text/calendar" style="display:none" />
 
     <div class="theme-toggle">
         <button id="darkModeToggle">
@@ -42,6 +47,69 @@
 
     <script>
 // Utility: format date as strict RFC3339 (no ms, always ends in Z)
+//
+// Lightweight .ics parser to extract VEVENT SUMMARY and DTSTART
+/**
+ * Parse raw ICS text and return array of {summary, date}
+ * Only supports DTSTART in formats YYYYMMDD, YYYYMMDDThhmmss, or ...Z
+ */
+function parseICS(text) {
+    // Unfold lines (RFC 5545 3.1) – remove CRLF followed by space / tab
+    text = text.replace(/\r?\n[ \t]/g, "");
+    const lines = text.split(/\r?\n/);
+    const events = [];
+    let current = null;
+    for (const line of lines) {
+        if (line.startsWith("BEGIN:VEVENT")) {
+            current = { summary: null, date: null, rrule: null };
+        } else if (line.startsWith("END:VEVENT")) {
+            if (current) events.push(current);
+            current = null;
+        } else if (current) {
+            if (line.startsWith("SUMMARY:")) {
+                current.summary = line.substring(8).trim();
+            } else if (line.startsWith("DTSTART")) {
+                const [, value] = line.split(":");
+                if (!value) continue;
+                let date = null;
+                const v = value.trim();
+                if (/^\d{8}T\d{6}Z$/.test(v)) {
+                    date = new Date(v);
+                } else if (/^\d{8}T\d{6}$/.test(v)) {
+                    const y = v.slice(0, 4), m = v.slice(4, 6), d = v.slice(6, 8);
+                    const H = v.slice(9, 11), M = v.slice(11, 13), S = v.slice(13, 15);
+                    date = new Date(Number(y), Number(m) - 1, Number(d), Number(H), Number(M), Number(S));
+                } else if (/^\d{8}$/.test(v)) {
+                    const y = v.slice(0, 4), m = v.slice(4, 6), d = v.slice(6, 8);
+                    date = new Date(Number(y), Number(m) - 1, Number(d));
+                }
+                current.date = date;
+            } else if (line.startsWith("RRULE:")) {
+                current.rrule = line.substring(6).trim();
+            }
+        }
+    }
+        // Map RRULE to recurrence fields
+    return events.map(ev => {
+        if (ev.rrule) {
+            const parts = Object.fromEntries(ev.rrule.split(';').map(p => p.split('=')));
+            const freq = (parts.FREQ || '').toUpperCase();
+            const interval = parseInt(parts.INTERVAL || '1', 10);
+            let unit = null;
+            switch (freq) {
+                case 'DAILY': unit = 'day'; break;
+                case 'WEEKLY': unit = 'week'; break;
+                case 'MONTHLY': unit = 'month'; break;
+                case 'YEARLY': unit = 'year'; break;
+            }
+            if (unit) {
+                ev.recurrenceInterval = interval;
+                ev.recurrenceUnit = unit;
+            }
+        }
+        return ev;
+    });
+}
 function toRFC3339NoMillis(date) {
     const pad = (n) => n.toString().padStart(2, '0');
     return date.getUTCFullYear() + '-' +
@@ -1413,6 +1481,85 @@ function toRFC3339NoMillis(date) {
                 console.error('Import error:', err, 'Stack:', err.stack);
                 alert('Import failed: ' + (err.message || 'Unknown error'));
             }finally{
+                e.target.value = '';
+            }
+        });
+
+                // Import Calendar (.ics) handler
+        document.getElementById('importCalendarFile').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const events = parseICS(text);
+
+                const nowUTC = new Date();
+                function getNextOccurrence(start, interval, unit) {
+                    if (!start) return null;
+                    const next = new Date(start.getTime());
+                    const inc = interval || 1;
+                    const step = unit;
+                    const add = {
+                        day: () => next.setUTCDate(next.getUTCDate() + inc),
+                        week: () => next.setUTCDate(next.getUTCDate() + inc * 7),
+                        month: () => next.setUTCMonth(next.getUTCMonth() + inc),
+                        year: () => next.setUTCFullYear(next.getUTCFullYear() + inc)
+                    }[step];
+                    if (!add) return next; // unsupported
+                    while (next < nowUTC) {
+                        add();
+                    }
+                    return next;
+                }
+
+                // Create a new project named after the uploaded file
+                const projectTitle = file.name.replace(/\.(ics|calendar)$/i, '') || 'Imported Calendar';
+                let projectId = 1;
+                try {
+                    const projResp = await fetch('/api/projects', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ title: projectTitle })
+                    });
+                    if (!projResp.ok) throw new Error('Failed to create project');
+                    const projData = await projResp.json();
+                    projectId = projData.id;
+                } catch (projErr) {
+                    console.error('Project creation failed, falling back to default project', projErr);
+                }
+
+                for (const ev of events) {
+                    // Build payload for each event as a todo
+                    const todoPayload = {
+                        title: ev.summary || 'Untitled event',
+                        completed: false,
+                        project_id: projectId,
+                                                // Determine correct due date
+                        due_date: (() => {
+                            if (!ev.date) return null;
+                            const nextDate = ev.recurrenceUnit ? getNextOccurrence(ev.date, ev.recurrenceInterval, ev.recurrenceUnit) : ev.date;
+                            return toRFC3339NoMillis(nextDate);
+                        })(),
+                        recurrence_interval: ev.recurrenceInterval,
+                        recurrence_unit: ev.recurrenceUnit
+                    };
+                    try {
+                        await fetch('/api/todo', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(todoPayload)
+                        });
+                    } catch (err) {
+                        console.error('Failed to create todo for event', ev, err);
+                    }
+                }
+
+                alert('Calendar import completed');
+                await loadTodosByProject();
+            } catch (err) {
+                console.error('ICS import error:', err);
+                alert('Import failed: ' + (err.message || 'Unknown error'));
+            } finally {
                 e.target.value = '';
             }
         });
