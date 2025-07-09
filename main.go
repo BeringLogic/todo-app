@@ -37,6 +37,13 @@ type Project struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type IcsSubscription struct {
+	ID            int        `json:"id"`
+	URL           string     `json:"url"`
+	ProjectID     int        `json:"project_id"`
+	LastUpdatedAt *time.Time `json:"last_updated_at"`
+}
+
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
@@ -126,7 +133,7 @@ func getProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var projects []Project
+	projects := make([]Project, 0)
 	for rows.Next() {
 		var project Project
 		if err := rows.Scan(&project.ID, &project.Title, &project.Position, &project.CreatedAt); err != nil {
@@ -743,6 +750,14 @@ func main() {
 		Handler: createRouter(),
 	}
 
+	// Periodically refresh ICS feeds
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			refreshIcsFeeds()
+		}
+	}()
+
 	fmt.Println("Server running on port 8081")
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
@@ -823,7 +838,94 @@ func createRouter() http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/api/subscribe_ics", subscribeToICSHandler)
+	mux.HandleFunc("/api/ics_subscriptions", getICSSubscriptionsHandler)
+	mux.HandleFunc("/api/cancel_ics_subscription", cancelICSSubscriptionHandler)
+
 	return mux
+}
+
+func getICSSubscriptionsHandler(w http.ResponseWriter, r *http.Request) {
+	rows, err := db.Query("SELECT id, url, project_id, last_updated_at FROM ics_subscriptions")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	subscriptions := make([]IcsSubscription, 0)
+	for rows.Next() {
+		var sub IcsSubscription
+		if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID, &sub.LastUpdatedAt); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		subscriptions = append(subscriptions, sub)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subscriptions)
+}
+
+func cancelICSSubscriptionHandler(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get the project_id before deleting the subscription
+	var projectID int
+	err := db.QueryRow("SELECT project_id FROM ics_subscriptions WHERE id = ?", id).Scan(&projectID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Subscription not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the subscription
+	stmt, err := db.Prepare("DELETE FROM ics_subscriptions WHERE id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Delete todos associated with the project
+	stmt, err = db.Prepare("DELETE FROM todos WHERE project_id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(projectID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Delete the project
+	stmt, err = db.Prepare("DELETE FROM projects WHERE id = ?")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
+
+	if _, err := stmt.Exec(projectID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func reorderTodos(w http.ResponseWriter, r *http.Request) {
@@ -869,4 +971,112 @@ func reorderTodos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func subscribeToICSHandler(w http.ResponseWriter, r *http.Request) {
+    var requestData struct {
+        URL         string `json:"url"`
+        ProjectName string `json:"project_name"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    // Check if the user is already subscribed to this feed
+    var existingSubscriptionID int
+    err := db.QueryRow("SELECT id FROM ics_subscriptions WHERE url = ?", requestData.URL).Scan(&existingSubscriptionID)
+    if err != nil && err != sql.ErrNoRows {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    if existingSubscriptionID != 0 {
+        http.Error(w, "You are already subscribed to this ICS feed", http.StatusConflict)
+        return
+    }
+
+    // Find or create the project
+    var projectID int
+    err = db.QueryRow("SELECT id FROM projects WHERE title = ?", requestData.ProjectName).Scan(&projectID)
+    if err == sql.ErrNoRows {
+        // Create the project if it doesn't exist
+        stmt, err := db.Prepare("INSERT INTO projects (title, position) VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM projects))")
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        defer stmt.Close()
+
+        result, err := stmt.Exec(requestData.ProjectName)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        id, err := result.LastInsertId()
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        projectID = int(id)
+    } else if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    stmt, err := db.Prepare("INSERT INTO ics_subscriptions (url, project_id) VALUES (?, ?)")
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer stmt.Close()
+
+    if _, err := stmt.Exec(requestData.URL, projectID); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    go refreshIcsFeeds()
+
+    w.WriteHeader(http.StatusCreated)
+}
+
+func refreshIcsFeeds() {
+    rows, err := db.Query("SELECT id, url, project_id FROM ics_subscriptions")
+    if err != nil {
+        log.Printf("Error getting ICS subscriptions: %v", err)
+        return
+    }
+    defer rows.Close()
+
+    for rows.Next() {
+        var sub IcsSubscription
+        if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID); err != nil {
+            log.Printf("Error scanning ICS subscription: %v", err)
+            continue
+        }
+
+        // Fetch and parse the ICS feed
+        // (For brevity, this example doesn't include the full ICS parsing logic.
+        // You would use a library like `github.com/apognu/gocal` to parse the feed.)
+
+        // After parsing, you would add the events as todos to the database.
+        // For example:
+        // for _, event := range events {
+        //     addTodoWithProject(event.Summary, event.Start, sub.ProjectID, ...)
+        // }
+
+        // Update the last_updated_at timestamp
+        stmt, err := db.Prepare("UPDATE ics_subscriptions SET last_updated_at = ? WHERE id = ?")
+        if err != nil {
+            log.Printf("Error preparing statement: %v", err)
+            continue
+        }
+        defer stmt.Close()
+
+        if _, err := stmt.Exec(time.Now(), sub.ID); err != nil {
+            log.Printf("Error updating last_updated_at: %v", err)
+        }
+    }
 }

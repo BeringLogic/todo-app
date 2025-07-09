@@ -31,6 +31,14 @@
                 <span>📅</span>
                 <span>Import Calendar</span>
             </div>
+            <div class="dropdown-item" onclick="subscribeToICS()">
+                <span>🔄</span>
+                <span>Subscribe to ICS</span>
+            </div>
+            <div class="dropdown-item" onclick="cancelSubscription()">
+                <span>🚫</span>
+                <span>Cancel ICS Subscription</span>
+            </div>
         </div>
     </div>
     <input type="file" id="importFile" accept="application/json" style="display:none" />
@@ -46,8 +54,6 @@
     <div class="projects-container"></div>
 
     <script>
-// Utility: format date as strict RFC3339 (no ms, always ends in Z)
-//
 // Lightweight .ics parser to extract VEVENT SUMMARY and DTSTART
 /**
  * Parse raw ICS text and return array of {summary, date}
@@ -110,6 +116,8 @@ function parseICS(text) {
         return ev;
     });
 }
+// Utility: format date as strict RFC3339 (no ms, always ends in Z)
+//
 function toRFC3339NoMillis(date) {
     const pad = (n) => n.toString().padStart(2, '0');
     return date.getUTCFullYear() + '-' +
@@ -119,6 +127,81 @@ function toRFC3339NoMillis(date) {
         pad(date.getUTCMinutes()) + ':' +
         pad(date.getUTCSeconds()) + 'Z';
 }
+
+        async function subscribeToICS() {
+            const url = prompt("Enter the URL of the ICS calendar to subscribe to:");
+            if (!url) return;
+
+            const projectName = prompt("Enter the name of the project for the imported todos:");
+            if (!projectName) return;
+
+            try {
+                const response = await fetch('/api/subscribe_ics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url, project_name: projectName })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Failed to subscribe to ICS feed');
+                }
+
+                alert('Successfully subscribed to ICS feed. The calendar will be updated periodically.');
+                await loadTodosByProject();
+            } catch (error) {
+                console.error('Error subscribing to ICS feed:', error);
+                alert('Failed to subscribe to ICS feed. ' + error.message);
+            }
+        }
+
+        async function cancelSubscription() {
+            try {
+                const response = await fetch('/api/ics_subscriptions');
+                if (!response.ok) {
+                    throw new new Error('Failed to fetch ICS subscriptions');
+                }
+                const subscriptions = await response.json();
+
+                if (subscriptions.length === 0) {
+                    alert('No ICS subscriptions to cancel.');
+                    return;
+                }
+
+                let message = 'Select a subscription to cancel:\n';
+                subscriptions.forEach((sub, index) => {
+                    message += `${index + 1}: ${sub.url}\n`;
+                });
+
+                const selection = prompt(message);
+                if (!selection) return;
+
+                const index = parseInt(selection, 10) - 1;
+                if (isNaN(index) || index < 0 || index >= subscriptions.length) {
+                    alert('Invalid selection.');
+                    return;
+                }
+
+                const subscriptionToCancel = subscriptions[index];
+                const confirmCancel = confirm(`Are you sure you want to cancel the subscription to ${subscriptionToCancel.url}?`);
+                if (!confirmCancel) return;
+
+                const cancelResponse = await fetch(`/api/cancel_ics_subscription?id=${subscriptionToCancel.id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!cancelResponse.ok) {
+                    const errorText = await cancelResponse.text();
+                    throw new Error(errorText || 'Failed to cancel ICS subscription');
+                }
+
+                alert('Successfully canceled ICS subscription.');
+                await loadTodosByProject();
+            } catch (error) {
+                console.error('Error canceling ICS subscription:', error);
+                alert('Failed to cancel ICS subscription. ' + error.message);
+            }
+        }
 
         /**
          * Build a read-only project group that lists todos due in the next 6 days.

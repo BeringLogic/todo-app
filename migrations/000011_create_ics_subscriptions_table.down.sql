@@ -1,0 +1,1 @@
+DROP TABLE ics_subscriptions;
