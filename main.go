@@ -5,12 +5,14 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/apognu/gocal"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite3"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -28,6 +30,7 @@ type Todo struct {
 	RecurrenceUnit     *string    `json:"recurrence_unit,omitempty"`
 	Position           int        `json:"position"`
 	ProjectID          int        `json:"project_id"`
+	UID                string     `json:"uid,omitempty"`
 }
 
 type Project struct {
@@ -974,109 +977,176 @@ func reorderTodos(w http.ResponseWriter, r *http.Request) {
 }
 
 func subscribeToICSHandler(w http.ResponseWriter, r *http.Request) {
-    var requestData struct {
-        URL         string `json:"url"`
-        ProjectName string `json:"project_name"`
-    }
+	var requestData struct {
+		URL         string `json:"url"`
+		ProjectName string `json:"project_name"`
+	}
 
-    if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // Check if the user is already subscribed to this feed
-    var existingSubscriptionID int
-    err := db.QueryRow("SELECT id FROM ics_subscriptions WHERE url = ?", requestData.URL).Scan(&existingSubscriptionID)
-    if err != nil && err != sql.ErrNoRows {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    if existingSubscriptionID != 0 {
-        http.Error(w, "You are already subscribed to this ICS feed", http.StatusConflict)
-        return
-    }
+	// Check if the user is already subscribed to this feed
+	var existingSubscriptionID int
+	err := db.QueryRow("SELECT id FROM ics_subscriptions WHERE url = ?", requestData.URL).Scan(&existingSubscriptionID)
+	if err != nil && err != sql.ErrNoRows {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if existingSubscriptionID != 0 {
+		http.Error(w, "You are already subscribed to this ICS feed", http.StatusConflict)
+		return
+	}
 
-    // Find or create the project
-    var projectID int
-    err = db.QueryRow("SELECT id FROM projects WHERE title = ?", requestData.ProjectName).Scan(&projectID)
-    if err == sql.ErrNoRows {
-        // Create the project if it doesn't exist
-        stmt, err := db.Prepare("INSERT INTO projects (title, position) VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM projects))")
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        defer stmt.Close()
+	// Find or create the project
+	var projectID int
+	err = db.QueryRow("SELECT id FROM projects WHERE title = ?", requestData.ProjectName).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		// Create the project if it doesn't exist
+		stmt, err := db.Prepare("INSERT INTO projects (title, position) VALUES (?, (SELECT COALESCE(MAX(position), 0) + 1 FROM projects))")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer stmt.Close()
 
-        result, err := stmt.Exec(requestData.ProjectName)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
+		result, err := stmt.Exec(requestData.ProjectName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-        id, err := result.LastInsertId()
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        projectID = int(id)
-    } else if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
+		id, err := result.LastInsertId()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		projectID = int(id)
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    stmt, err := db.Prepare("INSERT INTO ics_subscriptions (url, project_id) VALUES (?, ?)")
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer stmt.Close()
+	stmt, err := db.Prepare("INSERT INTO ics_subscriptions (url, project_id) VALUES (?, ?)")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer stmt.Close()
 
-    if _, err := stmt.Exec(requestData.URL, projectID); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
+	if _, err := stmt.Exec(requestData.URL, projectID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    go refreshIcsFeeds()
+	go refreshIcsFeeds()
 
-    w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusCreated)
 }
 
 func refreshIcsFeeds() {
-    rows, err := db.Query("SELECT id, url, project_id FROM ics_subscriptions")
-    if err != nil {
-        log.Printf("Error getting ICS subscriptions: %v", err)
-        return
-    }
-    defer rows.Close()
+	rows, err := db.Query("SELECT id, url, project_id FROM ics_subscriptions")
+	if err != nil {
+		log.Printf("Error getting ICS subscriptions: %v", err)
+		return
+	}
+	defer rows.Close()
 
-    for rows.Next() {
-        var sub IcsSubscription
-        if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID); err != nil {
-            log.Printf("Error scanning ICS subscription: %v", err)
-            continue
-        }
+	var subscriptions []IcsSubscription
+	for rows.Next() {
+		var sub IcsSubscription
+		if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID); err != nil {
+			log.Printf("Error scanning ICS subscription: %v", err)
+			continue
+		}
+		subscriptions = append(subscriptions, sub)
+	}
+	rows.Close()
 
-        // Fetch and parse the ICS feed
-        // (For brevity, this example doesn't include the full ICS parsing logic.
-        // You would use a library like `github.com/apognu/gocal` to parse the feed.)
+	for _, sub := range subscriptions {
+		var maxPosition int
+		err := db.QueryRow("SELECT COALESCE(MAX(position), 0) FROM todos WHERE project_id = ?", sub.ProjectID).Scan(&maxPosition)
+		if err != nil {
+			log.Printf("Error getting max position for project %d: %v", sub.ProjectID, err)
+			continue
+		}
+		positionCounter := maxPosition + 1
 
-        // After parsing, you would add the events as todos to the database.
-        // For example:
-        // for _, event := range events {
-        //     addTodoWithProject(event.Summary, event.Start, sub.ProjectID, ...)
-        // }
+		resp, err := http.Get(sub.URL)
+		if err != nil {
+			log.Printf("Error fetching ICS feed from %s: %v", sub.URL, err)
+			continue
+		}
+		defer resp.Body.Close()
 
-        // Update the last_updated_at timestamp
-        stmt, err := db.Prepare("UPDATE ics_subscriptions SET last_updated_at = ? WHERE id = ?")
-        if err != nil {
-            log.Printf("Error preparing statement: %v", err)
-            continue
-        }
-        defer stmt.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			log.Printf("Error fetching ICS feed from %s: status code %d, body: %s", sub.URL, resp.StatusCode, string(body))
+			continue
+		}
 
-        if _, err := stmt.Exec(time.Now(), sub.ID); err != nil {
-            log.Printf("Error updating last_updated_at: %v", err)
-        }
-    }
+		now := time.Now()
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		endOfYear := time.Date(now.Year()+2, time.December, 31, 23, 59, 59, 0, time.UTC)
+
+		cal := gocal.NewParser(resp.Body)
+		cal.Start = &startOfDay
+		cal.End = &endOfYear
+		cal.Parse()
+
+		for _, event := range cal.Events {
+			var existingTodoID int
+			err := db.QueryRow("SELECT id FROM todos WHERE uid = ?", event.Uid).Scan(&existingTodoID)
+			if err != nil && err != sql.ErrNoRows {
+				log.Printf("Error checking for existing todo with UID %s: %v", event.Uid, err)
+				continue
+			}
+
+			if existingTodoID == 0 {
+				var dueDate *time.Time
+				if event.Start != nil {
+					// Heuristic to check for all-day events: time is exactly midnight.
+					if event.Start.Hour() == 0 && event.Start.Minute() == 0 && event.Start.Second() == 0 {
+						// For all-day events, create a new time in local time using the event's date, then convert to UTC.
+						year, month, day := event.Start.Date()
+						localTime := time.Date(year, month, day, 0, 0, 0, 0, time.Local)
+						utcTime := localTime.UTC()
+						dueDate = &utcTime
+					} else {
+						// For timed events, just convert to UTC
+						utcTime := event.Start.UTC()
+						dueDate = &utcTime
+					}
+				}
+
+				// Todo doesn't exist, so create it
+				_, err := db.Exec(
+					"INSERT INTO todos (title, completed, project_id, due_date, uid, position) VALUES (?, 0, ?, ?, ?, ?)",
+					event.Summary,
+					sub.ProjectID,
+					dueDate,
+					event.Uid,
+					positionCounter,
+				)
+				if err != nil {
+					log.Printf("Error inserting new todo with UID %s: %v", event.Uid, err)
+				} else {
+					positionCounter++
+				}
+			}
+		}
+
+		// Update the last_updated_at timestamp
+		stmt, err := db.Prepare("UPDATE ics_subscriptions SET last_updated_at = ? WHERE id = ?")
+		if err != nil {
+			log.Printf("Error preparing statement: %v", err)
+			continue
+		}
+
+		if _, err := stmt.Exec(time.Now(), sub.ID); err != nil {
+			log.Printf("Error updating last_updated_at: %v", err)
+		}
+		stmt.Close()
+	}
 }

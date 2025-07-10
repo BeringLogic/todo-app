@@ -26,3 +26,11 @@ The `todo-app` is a web-based to-do list application.
 *   Import todos from Google Tasks.
 *   Import events from ICS calendars.
 *   Subscribe to ICS calendar feeds.
+
+## Requirements
+
+*   Users add todos to the top of the list.
+*   The server adds todos to the bottom of the list when refreshing a subscribed calendar.
+*   The backend stores due dates in UTC in the database.
+*   The frontend displays due dates in local time.
+
