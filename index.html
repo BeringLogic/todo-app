@@ -67,7 +67,7 @@ function parseICS(text) {
     let current = null;
     for (const line of lines) {
         if (line.startsWith("BEGIN:VEVENT")) {
-            current = { summary: null, date: null, rrule: null };
+            current = { summary: null, date: null, rrule: null, isAllDay: false };
         } else if (line.startsWith("END:VEVENT")) {
             if (current) events.push(current);
             current = null;
@@ -81,13 +81,16 @@ function parseICS(text) {
                 const v = value.trim();
                 if (/^\d{8}T\d{6}Z$/.test(v)) {
                     date = new Date(v);
+                    current.isAllDay = false;
                 } else if (/^\d{8}T\d{6}$/.test(v)) {
                     const y = v.slice(0, 4), m = v.slice(4, 6), d = v.slice(6, 8);
                     const H = v.slice(9, 11), M = v.slice(11, 13), S = v.slice(13, 15);
                     date = new Date(Number(y), Number(m) - 1, Number(d), Number(H), Number(M), Number(S));
+                    current.isAllDay = false;
                 } else if (/^\d{8}$/.test(v)) {
                     const y = v.slice(0, 4), m = v.slice(4, 6), d = v.slice(6, 8);
                     date = new Date(Number(y), Number(m) - 1, Number(d));
+                    current.isAllDay = true;
                 }
                 current.date = date;
             } else if (line.startsWith("RRULE:")) {
@@ -95,26 +98,46 @@ function parseICS(text) {
             }
         }
     }
-        // Map RRULE to recurrence fields
-    return events.map(ev => {
-        if (ev.rrule) {
-            const parts = Object.fromEntries(ev.rrule.split(';').map(p => p.split('=')));
-            const freq = (parts.FREQ || '').toUpperCase();
-            const interval = parseInt(parts.INTERVAL || '1', 10);
-            let unit = null;
-            switch (freq) {
-                case 'DAILY': unit = 'day'; break;
-                case 'WEEKLY': unit = 'week'; break;
-                case 'MONTHLY': unit = 'month'; break;
-                case 'YEARLY': unit = 'year'; break;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    // Filter events and map RRULE to recurrence fields
+    return events
+        .filter(ev => {
+            // Always keep events that have a recurrence rule.
+            if (ev.rrule) return true;
+            // If there's no date, keep it (it might be a timeless task).
+            if (!ev.date) return true;
+
+            if (ev.isAllDay) {
+                // For all-day events, keep it if its date is today or in the future.
+                return ev.date >= today;
+            } else {
+                // For timed events, only keep it if the date is not in the past.
+                if (ev.summary.startsWith("Lucie")) console.log(ev, ev.date >= now);
+                return ev.date >= now;
             }
-            if (unit) {
-                ev.recurrenceInterval = interval;
-                ev.recurrenceUnit = unit;
+        })
+        .map(ev => {
+            if (ev.rrule) {
+                const parts = Object.fromEntries(ev.rrule.split(';').map(p => p.split('=')));
+                const freq = (parts.FREQ || '').toUpperCase();
+                const interval = parseInt(parts.INTERVAL || '1', 10);
+                let unit = null;
+                switch (freq) {
+                    case 'DAILY': unit = 'day'; break;
+                    case 'WEEKLY': unit = 'week'; break;
+                    case 'MONTHLY': unit = 'month'; break;
+                    case 'YEARLY': unit = 'year'; break;
+                }
+                if (unit) {
+                    ev.recurrenceInterval = interval;
+                    ev.recurrenceUnit = unit;
+                }
             }
-        }
-        return ev;
-    });
+            return ev;
+        });
 }
 // Utility: format date as strict RFC3339 (no ms, always ends in Z)
 //
@@ -1575,6 +1598,11 @@ function toRFC3339NoMillis(date) {
             try {
                 const text = await file.text();
                 const events = parseICS(text);
+
+                if (events.length === 0) {
+                    alert('No upcoming events found in the calendar file.');
+                    return;
+                }
 
                 const nowUTC = new Date();
                 function getNextOccurrence(start, interval, unit) {
