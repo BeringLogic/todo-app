@@ -6,7 +6,6 @@ require (
 	github.com/apognu/gocal v0.9.1
 	github.com/golang-migrate/migrate/v4 v4.18.0
 	github.com/mattn/go-sqlite3 v1.14.22
-	github.com/teambition/rrule-go v1.8.2
 )
 
 require (
