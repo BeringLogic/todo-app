@@ -193,7 +193,7 @@ function toRFC3339NoMillis(date) {
 
                 let message = 'Select a subscription to cancel:\n';
                 subscriptions.forEach((sub, index) => {
-                    message += `${index + 1}: ${sub.url}\n`;
+                    message += `${index + 1}: ${sub.project_name} (${sub.url})\n`;
                 });
 
                 const selection = prompt(message);
@@ -1423,17 +1423,20 @@ function toRFC3339NoMillis(date) {
         // Export database handler
         document.getElementById('exportDatabase').addEventListener('click', async function() {
             try {
-                // Get all projects and todos in parallel
-                const [todosRes, projectsRes] = await Promise.all([
+                // Get all projects, todos, and subscriptions in parallel
+                const [todosRes, projectsRes, subscriptionsRes] = await Promise.all([
                     fetch('/api/todos'),
-                    fetch('/api/projects')
+                    fetch('/api/projects'),
+                    fetch('/api/ics_subscriptions')
                 ]);
                 
                 if (!todosRes.ok) throw new Error('Failed to fetch todos');
                 if (!projectsRes.ok) throw new Error('Failed to fetch projects');
+                if (!subscriptionsRes.ok) throw new Error('Failed to fetch subscriptions');
                 
                 let todos = await todosRes.json();
                 let projects = await projectsRes.json();
+                let subscriptions = await subscriptionsRes.json();
                 
                 // Filter out the special 'thisweek' project and its todos
                 projects = projects.filter(p => p.id !== 'thisweek');
@@ -1445,7 +1448,8 @@ function toRFC3339NoMillis(date) {
                     version: 1,
                     exportedAt: new Date().toISOString(),
                     projects: projects,
-                    todos: todos
+                    todos: todos,
+                    subscriptions: subscriptions
                 };
                 
                 // Create a blob and download link
@@ -1493,6 +1497,12 @@ function toRFC3339NoMillis(date) {
                     for (const project of projects) {
                         await fetch(`/api/projects/${project.id}`, { 
                             method: 'DELETE' 
+                        });
+                    }
+                    const subscriptions = await fetch('/api/ics_subscriptions').then(res => res.ok ? res.json() : []);
+                    for (const sub of subscriptions) {
+                        await fetch(`/api/cancel_ics_subscription?id=${sub.id}`, {
+                            method: 'DELETE'
                         });
                     }
                 } catch (err) {
@@ -1557,6 +1567,21 @@ function toRFC3339NoMillis(date) {
                         });
                     } catch (err) {
                         console.error(`Failed to import todo ${todo.id}:`, err);
+                    }
+                }
+
+                // Import subscriptions
+                if (data.subscriptions) {
+                    for (const sub of data.subscriptions) {
+                        try {
+                            await fetch('/api/subscribe_ics', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ url: sub.url, project_name: sub.project_name })
+                            });
+                        } catch (err) {
+                            console.error(`Failed to import subscription ${sub.url}:`, err);
+                        }
                     }
                 }
 

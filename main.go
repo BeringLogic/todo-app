@@ -44,6 +44,7 @@ type IcsSubscription struct {
 	ID            int        `json:"id"`
 	URL           string     `json:"url"`
 	ProjectID     int        `json:"project_id"`
+	ProjectName   string     `json:"project_name"`
 	LastUpdatedAt *time.Time `json:"last_updated_at"`
 }
 
@@ -849,7 +850,11 @@ func createRouter() http.Handler {
 }
 
 func getICSSubscriptionsHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query("SELECT id, url, project_id, last_updated_at FROM ics_subscriptions")
+	rows, err := db.Query(`
+		SELECT s.id, s.url, s.project_id, p.title, s.last_updated_at
+		FROM ics_subscriptions s
+		JOIN projects p ON s.project_id = p.id
+	`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -859,7 +864,7 @@ func getICSSubscriptionsHandler(w http.ResponseWriter, r *http.Request) {
 	subscriptions := make([]IcsSubscription, 0)
 	for rows.Next() {
 		var sub IcsSubscription
-		if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID, &sub.LastUpdatedAt); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.URL, &sub.ProjectID, &sub.ProjectName, &sub.LastUpdatedAt); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
