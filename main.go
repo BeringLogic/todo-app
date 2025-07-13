@@ -273,7 +273,6 @@ func deleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Then delete the project
 	stmt, err = db.Prepare("DELETE FROM ics_subscriptions WHERE project_id = ?")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
