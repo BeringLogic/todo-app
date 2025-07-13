@@ -6,33 +6,34 @@
     <title>Todo List</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://www.nerdfonts.com/assets/css/webfont.css">
 </head>
 <body>
     <div class="hamburger-menu">
         <button id="menuToggle">☰</button>
         <div class="dropdown-menu" id="dropdownMenu">
             <div class="dropdown-item" onclick="addProject()">
-                <span>+</span>
+                <span id="newProjectIcon"><i class="nf nf-cod-project"></i></span>
                 <span>New Project</span>
             </div>
             <div class="dropdown-item" onclick="document.getElementById('importFile').click()">
-                <span>⇪</span>
+                <span id="importGoogleTasksIcon"><i class="nf nf-fa-google"></i></span>
                 <span>Import Google Tasks</span>
             </div>
             <div class="dropdown-item" id="exportDatabase">
-                <span>⤓</span>
+                <span id="exportDatabaseIcon"><i class="nf nf-md-database_export"></i></span>
                 <span>Export Database</span>
             </div>
             <div class="dropdown-item" id="importDatabase">
-                <span>↑</span>
+                <span id="importDatabaseIcon"><i class="nf nf-md-database_import"></i></span>
                 <span>Import Database</span>
             </div>
             <div class="dropdown-item" onclick="document.getElementById('importCalendarFile').click()">
-                <span>📅</span>
+                <span id="importCalendarIcon"><i class="nf nf-md-calendar_month"></i></span>
                 <span>Import Calendar</span>
             </div>
             <div class="dropdown-item" onclick="subscribeToICS()">
-                <span>🔄</span>
+                <span id="subscribeToICSIcon"><i class="nf nf-md-calendar_sync"></i></span>
                 <span>Subscribe to ICS</span>
             </div>
         </div>
@@ -1239,9 +1240,9 @@ function toRFC3339NoMillis(date) {
                         } else if (datePart < todayLocal && !todo.completed) {
                             dueDateClass = "overdue";
                         }
-                        dueDateHtml = `<div class="due-date ${dueDateClass}">&#x1F5D3; ${datePart} &#x1F553; ${timeStr}</div>`;
+                        dueDateHtml = `<div class="due-date ${dueDateClass}"><i class="nf nf-md-calendar"></i> ${datePart} <i class="nf nf-fa-clock"></i> ${timeStr}</div>`;
                         if (todo.recurrence_interval && todo.recurrence_unit) {
-                            recurrenceHtml = `<div class="recurrence-info ${dueDateClass}">&#x1f504; Every ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</div>`;
+                            recurrenceHtml = `<div class="recurrence-info ${dueDateClass}"><i class="nf nf-md-refresh"></i> Every ${todo.recurrence_interval} ${todo.recurrence_unit}(s)</div>`;
                         }
                     }
 

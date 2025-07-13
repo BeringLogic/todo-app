@@ -60,6 +60,10 @@ body {
     text-rendering: optimizeLegibility;
 }
 
+.nf {
+    vertical-align: top;
+}
+
 .hamburger-menu {
     position: absolute;
     top: 20px;
@@ -82,7 +86,6 @@ body {
 .dropdown-menu {
     position: absolute;
     top: 100%;
-    left: 10px;
     background-color: var(--container-bg);
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -106,6 +109,30 @@ body {
 
 .dropdown-item:hover {
     background-color: var(--toggle-bg);
+}
+
+#newProjectIcon {
+    color: var(--primary-color);
+}
+
+#importGoogleTasksIcon {
+    color: var(--blue-color);
+}
+
+#importDatabaseIcon {
+    color: var(--yellow-color);
+}
+
+#exportDatabaseIcon {
+    color: var(--yellow-color);
+}
+
+#importCalendarIcon {
+    color: var(--red-color);
+}
+
+#subscribeToICSIcon {
+    color: var(--red-color);
 }
 
 /* Import Progress Modal */
@@ -484,6 +511,10 @@ textarea.project-title {
 .due-date, .recurrence-info {
     color: var(--blue-color);
     font-size: 0.9em;
+}
+.due-date i, .recurrence-info i {
+    font-size: 0.9em;
+    vertical-align: 2px;
 }
 
 .today {
