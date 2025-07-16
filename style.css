@@ -323,17 +323,7 @@ body {
     color: var(--text-color);
 }
 
-.theme-toggle .moon {
-    display: none;
-}
 
-body.dark-mode .theme-toggle .sun {
-    display: none;
-}
-
-body.dark-mode .theme-toggle .moon {
-    display: inline;
-}
 
 .projects-container {
     display: flex;
