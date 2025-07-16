@@ -207,6 +207,12 @@ function toRFC3339NoMillis(date) {
             });
         }
 
+        // Highlight hashtags
+        function hashtagify(text) {
+            const hashtagPattern = /(#\w+)/g;
+            return text.replace(hashtagPattern, '<span class="hashtag">$1</span>');
+        }
+
         function startProjectEdit(element) {
             if (editingProject) return;
 
@@ -1249,7 +1255,7 @@ function toRFC3339NoMillis(date) {
                     li.innerHTML = `
                             <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? 'checked' : ''}>
                             <div class="todo-content">
-                                <pre class="todo-text" data-id="${todo.id}">${linkify(todo.title)}</pre>
+                                <pre class="todo-text" data-id="${todo.id}">${linkify(hashtagify(todo.title))}</pre>
                                 ${dueDateHtml}
                                 ${recurrenceHtml}
                             </div>
@@ -1756,7 +1762,7 @@ function toRFC3339NoMillis(date) {
                     e.preventDefault();
                     const pre = document.createElement('pre');
                     pre.className = 'todo-text';
-                    pre.innerHTML = linkify(originalText);
+                    pre.innerHTML = linkify(hashtagify(originalText));
                     pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                     textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
@@ -1768,7 +1774,7 @@ function toRFC3339NoMillis(date) {
             textarea.addEventListener('blur', async function() {
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.innerHTML = linkify(originalText);
+                pre.innerHTML = linkify(hashtagify(originalText));
                 pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
@@ -1779,11 +1785,11 @@ function toRFC3339NoMillis(date) {
         async function saveEdit(textarea, originalText) {
             const id = Number(textarea.dataset.id);
             const newTitle = textarea.value.trim();
-            if (newTitle === originalText || newTitle === '') {
+            if (newTitle === originalText.trim() || newTitle === '') {
                 // Restore original text if no changes or empty
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.innerHTML = linkify(originalText);
+                pre.innerHTML = linkify(hashtagify(originalText));
                 pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
@@ -1885,7 +1891,7 @@ function toRFC3339NoMillis(date) {
                 // Replace input with new pre
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.innerHTML = linkify(newTitle);
+                pre.innerHTML = linkify(hashtagify(newTitle));
                 pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
@@ -1896,7 +1902,7 @@ function toRFC3339NoMillis(date) {
                 // Restore original text
                 const pre = document.createElement('pre');
                 pre.className = 'todo-text';
-                pre.innerHTML = linkify(originalText);
+                pre.innerHTML = linkify(hashtagify(originalText));
                 pre.addEventListener('click', function(e){ if (e.target.closest('a')) return; editTodo(id, pre); });
                 textarea.replaceWith(pre);
                 const liDone = pre.closest('.todo-item');
