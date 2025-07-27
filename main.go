@@ -63,6 +63,7 @@ var styleCSS []byte
 var db *sql.DB
 
 func init() {
+	log.SetFlags(log.LstdFlags)
 	var err error
 	db, err = sql.Open("sqlite3", "./data/todos.db")
 	if err != nil {
@@ -773,7 +774,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Server running on port 8081")
+	log.Println("Server running on port 8081")
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
