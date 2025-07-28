@@ -60,6 +60,9 @@ var faviconSVG []byte
 //go:embed style.css
 var styleCSS []byte
 
+//go:embed todo-app.js
+var todoAppJS []byte
+
 var db *sql.DB
 
 func init() {
@@ -793,6 +796,12 @@ func createRouter() http.Handler {
 	mux.HandleFunc("/style.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
 		w.Write(styleCSS)
+	})
+
+	// Serve todo-app.js
+	mux.HandleFunc("/todo-app.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Write(todoAppJS)
 	})
 
 	// Serve embedded index.html at root
