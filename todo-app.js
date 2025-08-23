@@ -1831,17 +1831,6 @@ document.addEventListener("DOMContentLoaded", async function () {
   document.querySelectorAll(".todo-menu-btn").forEach((btn) => {
     btn.setAttribute("draggable", "false");
   });
-  // Check if dark mode is saved in localStorage
-  const savedMode = localStorage.getItem("darkMode");
-  if (savedMode === "true") {
-    document.body.classList.add("dark-mode");
-    document.getElementById("darkModeToggle").classList.add("dark-mode");
-    localStorage.setItem("darkMode", "true");
-  } else {
-    document.body.classList.remove("dark-mode");
-    document.getElementById("darkModeToggle").classList.remove("dark-mode");
-    localStorage.setItem("darkMode", "false");
-  }
 
   try {
     await loadTodosByProject();
@@ -2194,18 +2183,98 @@ async function deleteTodo(id) {
   }
 }
 
-// Dark mode toggle
-document
-  .getElementById("darkModeToggle")
-  .addEventListener("click", function () {
-    document.body.classList.toggle("dark-mode");
-    this.classList.toggle("dark-mode");
+// Theme menu: system | light | dark
+(function initThemeMenu() {
+  const THEME_KEY = "theme"; // values: 'system' | 'light' | 'dark'
+  const btn = document.getElementById("themeMenuButton");
+  const menu = document.getElementById("themeMenu");
+  const mql = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
 
-    // Save preference to localStorage
-    if (document.body.classList.contains("dark-mode")) {
-      localStorage.setItem("darkMode", "true");
-    } else {
-      localStorage.setItem("darkMode", "false");
+  function getStoredTheme() {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "light" || v === "dark" || v === "system") return v;
+    // Migrate legacy boolean darkMode -> theme
+    const legacy = localStorage.getItem("darkMode");
+    if (legacy === "true") {
+      localStorage.setItem(THEME_KEY, "dark");
+      localStorage.removeItem("darkMode");
+      return "dark";
     }
-  });
+    if (legacy === "false") {
+      localStorage.setItem(THEME_KEY, "light");
+      localStorage.removeItem("darkMode");
+      return "light";
+    }
+    return "system";
+  }
+
+  function setStoredTheme(v) {
+    localStorage.setItem(THEME_KEY, v);
+  }
+
+  function applyTheme(pref) {
+    let useDark = false;
+    if (pref === "dark") useDark = true;
+    else if (pref === "light") useDark = false;
+    else useDark = !!(mql && mql.matches); // system
+
+    if (useDark) document.body.classList.add("dark-mode");
+    else document.body.classList.remove("dark-mode");
+  }
+
+  function updateSelectedUI(pref) {
+    if (!menu) return;
+    menu.querySelectorAll(".theme-menu-item").forEach((item) => {
+      const active = item.dataset.theme === pref;
+      item.classList.toggle("active", active);
+    });
+  }
+
+  // Initialize
+  const initial = getStoredTheme();
+  applyTheme(initial);
+  updateSelectedUI(initial);
+
+  // React to system changes when in system mode
+  if (mql && mql.addEventListener) {
+    mql.addEventListener("change", () => {
+      if (getStoredTheme() === "system") applyTheme("system");
+    });
+  } else if (mql && mql.addListener) {
+    // Safari
+    mql.addListener(() => {
+      if (getStoredTheme() === "system") applyTheme("system");
+    });
+  }
+
+  // Open/close menu
+  if (btn && menu) {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isOpen = menu.classList.toggle("active");
+      btn.setAttribute("aria-expanded", String(isOpen));
+    });
+
+    // Choose theme
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest(".theme-menu-item");
+      if (!item) return;
+      const pref = item.dataset.theme;
+      if (!pref) return;
+      setStoredTheme(pref);
+      applyTheme(pref);
+      updateSelectedUI(pref);
+      menu.classList.remove("active");
+      btn.setAttribute("aria-expanded", "false");
+    });
+
+    // Click outside closes
+    document.addEventListener("click", (e) => {
+      if (!menu.classList.contains("active")) return;
+      if (e.target.closest("#themeMenu") || e.target.closest("#themeMenuButton")) return;
+      menu.classList.remove("active");
+      btn.setAttribute("aria-expanded", "false");
+    });
+  }
+})();
 

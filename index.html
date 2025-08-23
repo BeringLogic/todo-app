@@ -43,9 +43,23 @@
     <input type="file" id="importCalendarFile" accept=".ics,text/calendar" style="display:none" />
 
     <div class="theme-toggle">
-        <button id="darkModeToggle">
+        <button id="themeMenuButton" aria-haspopup="true" aria-expanded="false" title="Theme">
             <i class="nf nf-md-theme_light_dark"></i>
         </button>
+        <div class="theme-menu" id="themeMenu" role="menu" aria-label="Theme">
+            <div class="theme-menu-item" data-theme="system" role="menuitem">
+                <i class="nf nf-md-monitor"></i>
+                <span>System</span>
+            </div>
+            <div class="theme-menu-item" data-theme="light" role="menuitem">
+                <i class="nf nf-md-white_balance_sunny"></i>
+                <span>Light</span>
+            </div>
+            <div class="theme-menu-item" data-theme="dark" role="menuitem">
+                <i class="nf nf-md-weather_night"></i>
+                <span>Dark</span>
+            </div>
+        </div>
     </div>
     <div class="projects-container"></div>
 
