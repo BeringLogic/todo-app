@@ -1910,6 +1910,8 @@ async function editTodo(id, element) {
   textarea.addEventListener("keypress", async function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // Mark as saving to suppress blur handler
+      textarea.dataset.saving = "1";
       await saveEdit(textarea, originalText);
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -1920,7 +1922,9 @@ async function editTodo(id, element) {
         if (e.target.closest("a")) return;
         editTodo(id, pre);
       });
-      textarea.replaceWith(pre);
+      // Mark cancel to suppress blur and guard replacement
+      textarea.dataset.cancel = "1";
+      if (textarea.isConnected) textarea.replaceWith(pre);
       const liDone = pre.closest(".todo-item");
       if (liDone) liDone.setAttribute("draggable", "true");
     }
@@ -1928,6 +1932,10 @@ async function editTodo(id, element) {
 
   // Handle blur without saving
   textarea.addEventListener("blur", async function () {
+    // If we're in the middle of saving or canceling, do nothing
+    if (textarea.dataset.saving === "1" || textarea.dataset.cancel === "1") return;
+    // Only replace if the textarea is still attached
+    if (!textarea.isConnected) return;
     const pre = document.createElement("pre");
     pre.className = "todo-text";
     pre.innerHTML = linkify(hashtagify(originalText));
@@ -1935,13 +1943,15 @@ async function editTodo(id, element) {
       if (e.target.closest("a")) return;
       editTodo(id, pre);
     });
-    textarea.replaceWith(pre);
+    if (textarea.isConnected) textarea.replaceWith(pre);
     const liDone = pre.closest(".todo-item");
     if (liDone) liDone.setAttribute("draggable", "true");
   });
 }
 
 async function saveEdit(textarea, originalText) {
+  // Ensure blur handler is suppressed during save
+  textarea.dataset.saving = "1";
   const id = Number(textarea.dataset.id);
   const newTitle = textarea.value.trim();
   if (newTitle === originalText.trim() || newTitle === "") {
@@ -1953,7 +1963,7 @@ async function saveEdit(textarea, originalText) {
       if (e.target.closest("a")) return;
       editTodo(id, pre);
     });
-    textarea.replaceWith(pre);
+    if (textarea.isConnected) textarea.replaceWith(pre);
     const liDone = pre.closest(".todo-item");
     if (liDone) liDone.setAttribute("draggable", "true");
     return;
@@ -2059,7 +2069,7 @@ async function saveEdit(textarea, originalText) {
       if (e.target.closest("a")) return;
       editTodo(id, pre);
     });
-    textarea.replaceWith(pre);
+    if (textarea.isConnected) textarea.replaceWith(pre);
     const liDone = pre.closest(".todo-item");
     if (liDone) liDone.setAttribute("draggable", "true");
   } catch (error) {
@@ -2073,9 +2083,13 @@ async function saveEdit(textarea, originalText) {
       if (e.target.closest("a")) return;
       editTodo(id, pre);
     });
-    textarea.replaceWith(pre);
+    if (textarea.isConnected) textarea.replaceWith(pre);
     const liDone = pre.closest(".todo-item");
     if (liDone) liDone.setAttribute("draggable", "true");
+  } finally {
+    // Clear saving flags
+    delete textarea.dataset.saving;
+    delete textarea.dataset.cancel;
   }
 }
 
