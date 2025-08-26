@@ -18,6 +18,8 @@
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 
 # Environment variables
 .env

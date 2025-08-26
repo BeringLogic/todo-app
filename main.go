@@ -73,6 +73,11 @@ func init() {
 		log.Fatal(err)
 	}
 
+	// Enable WAL mode for better concurrent access
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		log.Fatal("Failed to enable WAL mode:", err)
+	}
+
 	// Run migrations
 	if err := runMigrations(); err != nil {
 		log.Fatal(err)
