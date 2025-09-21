@@ -555,7 +555,7 @@ textarea.project-title {
 .todo-menu-btn {
     display: block;
     align-self: flex-start;
-    margin: 4px 0 0 auto;
+    padding: 8px;
     background: none;
     border: none;
     color: var(--text-color);
