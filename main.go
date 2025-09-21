@@ -657,6 +657,26 @@ func updateTodo(w http.ResponseWriter, r *http.Request) {
 			nextDue = time.Time{}
 		}
 
+		// Ensure the next due date is >= today
+		if !nextDue.IsZero() {
+			now := time.Now().UTC()
+			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+			// Keep advancing the date until it's >= today
+			for nextDue.Before(today) {
+				switch strings.ToLower(*requestData.RecurrenceUnit) {
+				case "day", "days":
+					nextDue = nextDue.AddDate(0, 0, *requestData.RecurrenceInterval)
+				case "week", "weeks":
+					nextDue = nextDue.AddDate(0, 0, 7*(*requestData.RecurrenceInterval))
+				case "month", "months":
+					nextDue = nextDue.AddDate(0, *requestData.RecurrenceInterval, 0)
+				case "year", "years":
+					nextDue = nextDue.AddDate(*requestData.RecurrenceInterval, 0, 0)
+				}
+			}
+		}
+
 		// Explicitly preserve hour, minute, second, nanosecond from baseDue (already preserved by AddDate, but this is robust)
 		if !nextDue.IsZero() {
 			nextDue = time.Date(
