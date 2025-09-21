@@ -1257,11 +1257,11 @@ async function loadProject(project, filteredTodos) {
     const projectGroup = document.createElement("div");
     projectGroup.className = "project-item";
     projectGroup.innerHTML = `
-                    <div class="project-title-container">
-                        <div class="project-title" data-id="${project.id}" ${project.id !== "thisweek" ? 'draggable="true"' : ""}>${project.title}</div>
-                        <div class="active-count-badge"></div>
-                        <button class="delete-project-btn" data-id="${project.id}">✕</button>
-                    </div>
+                     <div class="project-title-container">
+                         <div class="project-title" data-id="${project.id}" ${project.id !== "thisweek" ? 'draggable="true"' : ""} role="button">${project.title}</div>
+                         <div class="active-count-badge"></div>
+                         <button class="delete-project-btn" data-id="${project.id}">✕</button>
+                     </div>
                     <div class="todo-form">
                         <textarea class="todo-input" data-id="${project.id}" rows="1" placeholder="Add a new todo..."></textarea>
                     </div>
@@ -1327,11 +1327,11 @@ async function loadProject(project, filteredTodos) {
 
       li.innerHTML = `
                             <input class="todo-checkbox" type="checkbox" onchange="toggleTodo(${todo.id})" ${todo.completed ? "checked" : ""}>
-                            <div class="todo-content">
-                                <pre class="todo-text" data-id="${todo.id}">${linkify(hashtagify(todo.title))}</pre>
-                                ${dueDateHtml}
-                                ${recurrenceHtml}
-                            </div>
+                             <div class="todo-content">
+                                 <pre class="todo-text" data-id="${todo.id}" role="button">${linkify(hashtagify(todo.title))}</pre>
+                                 ${dueDateHtml}
+                                 ${recurrenceHtml}
+                             </div>
                             <button class="todo-menu-btn" data-id="${todo.id}">⋮</button>
                             <div class="todo-menu">
                                 <div class="todo-menu-item" style="display:flex; flex-direction:column; gap:4px;">
@@ -1381,9 +1381,9 @@ async function loadProject(project, filteredTodos) {
                                         <option value="year" ${todo.recurrence_unit === "year" ? "selected" : ""}>year(s)</option>
                                     </select>
                                 </div>
-                                <div class="todo-menu-item" data-action="save" data-id="${todo.id}">Save</div>
-                                <div class="todo-menu-item" data-action="cancel">Cancel</div>
-                                <div class="todo-menu-item" data-action="delete" data-id="${todo.id}">Delete</div>
+                                <div class="todo-menu-item" role="button" data-action="save" data-id="${todo.id}">Save</div>
+                                <div class="todo-menu-item" role="button" data-action="cancel">Cancel</div>
+                                <div class="todo-menu-item" role="button" data-action="delete" data-id="${todo.id}">Delete</div>
                             </div>
                         `;
 
