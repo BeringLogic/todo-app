@@ -2083,8 +2083,8 @@ async function saveEdit(textarea, originalText) {
 }
 
 async function toggleTodo(id) {
-  const checkbox = event.target;
-  const todoItem = checkbox.parentElement;
+  const todoItem = document.querySelector(`.todo-item[data-id="${id}"]`);
+  const checkbox = todoItem.querySelector('.todo-checkbox');
   const titleElement = todoItem.querySelector(".todo-text");
   const title = titleElement.textContent;
 
