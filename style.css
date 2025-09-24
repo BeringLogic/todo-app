@@ -537,10 +537,10 @@ textarea.project-title {
 
 .due-date, .recurrence-info {
     color: var(--blue-color);
-    font-size: 0.9em;
+    font-size: 0.8em;
 }
 .due-date i, .recurrence-info i {
-    font-size: 0.9em;
+    font-size: 0.8em;
     vertical-align: 2px;
 }
 
